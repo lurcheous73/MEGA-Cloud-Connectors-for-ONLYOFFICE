@@ -31,7 +31,7 @@ namespace ASC.Files.Thirdparty.MegaS4
                 {
                     var key = "__MEGAS4_STORAGE_" + ID;
                     var wrapper = (StorageDisposableWrapper)DisposableHttpContext.Current[key];
-                    if (wrapper == null)
+                    if (wrapper == null || wrapper.Storage == null)
                     {
                         wrapper = new StorageDisposableWrapper(CreateStorage());
                         DisposableHttpContext.Current[key] = wrapper;
@@ -86,8 +86,13 @@ namespace ASC.Files.Thirdparty.MegaS4
             if (HttpContext.Current == null) return;
             var key = "__MEGAS4_STORAGE_" + ID;
             var wrapper = (StorageDisposableWrapper)DisposableHttpContext.Current[key];
-            if (wrapper != null) wrapper.Dispose();
-            DisposableHttpContext.Current[key] = null;
+            if (wrapper != null)
+            {
+                // BRIMSTONE: DisposableHttpContext rejects null assignments.
+                // Match ONLYOFFICE's stock providers: dispose the per-request
+                // wrapper and let Storage recreate it if accessed again.
+                wrapper.Dispose();
+            }
         }
 
         internal void UpdateTitle(string title)
