@@ -1,4 +1,4 @@
-# BRIMSTONE MEGA S4 v0.004 status
+# BRIMSTONE MEGA S4 v0.005 status
 
 Baseline date: 2026-08-16
 Upstream CommunityServer baseline: `ONLYOFFICE/CommunityServer@fe1fa7babd093969e939ba6ff45a9fee1299dc93`
@@ -24,6 +24,24 @@ The provider ID namespace remains:
 - root: `sboxmega-<providerId>`
 - object/folder: `sboxmega-<providerId>-<base64url-key>`
 
+## v0.005 helper-handler milestone — PRECOMPILED ROUTE PROVEN
+
+The MEGA S4 bucket-discovery helper is now installed using the same precompiled ASP.NET pattern as stock ONLYOFFICE handlers:
+
+- physical `/Products/Files/HttpHandlers/brimstone-megas4.ashx` is the stock 86-byte precompilation marker;
+- `/bin/brimstone-megas4.ashx.brimstone.compiled` maps the virtual path directly to `ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler` in `ASC.Files.Thirdparty`;
+- no explicit Brimstone `Web.config` handler mapping is required;
+- the previous Mono dynamic-parser failure (`System.Web.Compilation.ParseException` / missing `System.Runtime, Version=4.0.0.0`) is eliminated.
+
+Controlled restart acceptance on 2026-08-16:
+
+- anonymous local POST to the helper returns HTTP 401 JSON: `{"ok":false,"error":"Authentication required."}`;
+- this proves the compiled Brimstone `IHttpHandler` is instantiated and `ProcessRequest()` is executing;
+- MySQL restart count remained 35 and MySQL `StartedAt` did not change;
+- live connector DLL remained exactly `62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f`.
+
+The external-MySQL startup-script guard is also installed: CommunityServer's two plain `mysqladmin shutdown` calls have been replaced with local-socket-only shutdown calls, preventing CommunityServer restarts from shutting down the separate `onlyoffice-mysql-server` container.
+
 ## ONLYOFFICE integration — PROVEN
 
 - Manual credentials plus a manually entered bucket name save successfully.
@@ -45,9 +63,10 @@ The provider ID namespace remains:
 
 ## Known remaining bugs / polish
 
-1. **Bucket helper** — `Pull buckets` still fails because `/Products/Files/HttpHandlers/brimstone-megas4.ashx` returns the ASP.NET Runtime Error page before Brimstone JSON. Manual bucket entry remains functional.
+1. **Authenticated bucket helper UI acceptance** — the server route now executes correctly as a native precompiled handler. `Pull buckets` still needs one authenticated Files-UI acceptance using typed credentials to prove the browser request carries the ONLYOFFICE authentication context and receives the MEGA S4 bucket list.
 2. **Existing account editor** — existing MEGA accounts still need a proper Brimstone editor rather than the stock Connection URL / Password / Folder title form.
-3. **Shared credential import UX** — server-side import is retained, but bucket discovery through the broken helper is not yet usable. Test Save separately from bucket discovery before declaring this path complete.
+3. **Shared credential import UX** — server-side import is retained; prove authenticated bucket discovery from the shared S3-Compatible credential store after the typed-credential path is accepted.
+4. **Large/chunked upload acceptance** — explicit upload above the chunk threshold remains to be tested.
 
 ## Core acceptance — PASSED
 
