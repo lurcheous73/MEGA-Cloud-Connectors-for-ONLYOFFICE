@@ -24,7 +24,7 @@ branch(){ git -C "$REPO" rev-parse --abbrev-ref HEAD; }
 worktree_clean(){ [[ -z "$(git -C "$REPO" status --porcelain)" ]]; }
 live_dll_hash(){ docker exec "$C" sha256sum "$LIVE_DLL" | awk '{print $1}'; }
 map_path_count(){ docker exec "$C" sh -lc "grep -Fc 'path=\"$MAP_PATH\"' '$WEB' || true"; }
-map_exact_count(){ docker exec "$C" sh -lc "grep -Fxc '$MAP_LINE' '$WEB' || true"; }
+map_exact_count(){ docker exec "$C" sh -lc "tr -d '\r' < '$WEB' | grep -Fxc '$MAP_LINE' || true"; }
 httphandlers_open_count(){ docker exec "$C" sh -lc "grep -Ec '<httpHandlers([[:space:]]|>)' '$WEB' || true"; }
 httphandlers_close_count(){ docker exec "$C" sh -lc "grep -Ec '</httpHandlers>' '$WEB' || true"; }
 mysql_safe_count(){ docker exec "$C" sh -lc "grep -Ec '^[[:space:]]*mysqladmin --no-defaults --protocol=socket --socket=/var/run/mysqld/mysqld.sock shutdown \\|\\| true[[:space:]]*$' '$RUN' || true"; }
@@ -122,7 +122,7 @@ PY
 
   validate_xml "$patched"
   [[ "$(grep -Fc "path=\"$MAP_PATH\"" "$patched" || true)" == "1" ]] || fail "patched temp missing exact handler path"
-  [[ "$(grep -Fxc "$MAP_LINE" "$patched" || true)" == "1" ]] || fail "patched temp missing exact mapping line"
+  [[ "$(tr -d '\r' < "$patched" | grep -Fxc "$MAP_LINE" || true)" == "1" ]] || fail "patched temp missing exact mapping line"
 
   read -r uid gid mode < <(docker exec "$C" stat -c '%u %g %a' "$WEB")
   docker cp "$patched" "$C:/tmp/brimstone-Web.config" >/dev/null
