@@ -29,7 +29,27 @@ namespace ASC.Files.Thirdparty.MegaS4
 
         protected string DecodeId(object id)
         {
-            return Convert.ToString(Selector.ConvertId(id));
+            if (id == null) throw new ArgumentNullException("id");
+
+            var text = Convert.ToString(id);
+            int linkId;
+            string key;
+
+            // ProviderFolderDao / ProviderFileDao select the provider using the
+            // external ONLYOFFICE id and then pass selector.ConvertId(id) into
+            // the provider-specific DAO. Therefore provider DAO methods normally
+            // receive the already-decoded S4 key (including "" for the root).
+            //
+            // Some internal/direct call paths still hand us the external id, so
+            // accept both forms but reject an external id for another account.
+            if (MegaS4Id.TryParse(text, out linkId, out key))
+            {
+                if (linkId != ProviderInfo.ID)
+                    throw new ArgumentException("MEGA S4 id belongs to another provider account.", "id");
+                return key;
+            }
+
+            return text ?? string.Empty;
         }
 
         protected string MakeId(string key)
