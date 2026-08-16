@@ -218,3 +218,126 @@
     }
     window.addEventListener("load", function () { schedule(0); }, { once: true });
 })();
+
+/* MEGA S4 LIVE EXTENSION v3 — deterministic credential-field layout.
+ * This overlay deliberately runs after v2 so it can be appended safely to an
+ * already-patched CommunityServer bundle without replacing v2's save plumbing.
+ */
+(function () {
+    if (window.__megaS4OnlyOfficeExtensionV3Loaded) {
+        return;
+    }
+    window.__megaS4OnlyOfficeExtensionV3Loaded = true;
+
+    var attempts = 0;
+    var MAX_ATTEMPTS = 120;
+    var timer = null;
+    var observer = null;
+
+    function normaliseMegaS4Form() {
+        if (!window.jq) {
+            return false;
+        }
+
+        var account = jq("#account_MegaS4");
+        if (!account.length) {
+            return false;
+        }
+
+        var credentials = account.find(".account-log-pass-container");
+        var urlRow = account.find(".account-field-url");
+        var login = account.find(".account-input-login");
+        var password = account.find(".account-input-pass");
+        var loginRow = login.closest(".account-field-row");
+        var passwordRow = password.closest(".account-field-row");
+
+        urlRow.find(".account-field-title").text("Endpoint");
+        loginRow.find(".account-field-title").text("Access key");
+        passwordRow.find(".account-field-title").text("Secret key");
+
+        login
+            .removeAttr("maxlength")
+            .attr("autocomplete", "off")
+            .attr("autocapitalize", "none")
+            .attr("spellcheck", "false");
+
+        password
+            .removeAttr("maxlength")
+            .attr("type", "password")
+            .attr("autocomplete", "new-password")
+            .attr("autocapitalize", "none")
+            .attr("spellcheck", "false");
+
+        var bucketRow = account.find(".mega-s4-bucket-row");
+        if (!bucketRow.length) {
+            bucketRow = jq(
+                '<div class="account-field-row mega-s4-bucket-row">' +
+                    '<div class="account-field-title">Bucket name</div>' +
+                    '<div class="account-field-body">' +
+                        '<input type="text" class="textEdit account-input-megas4-bucket" name="account-field" autocomplete="off" autocapitalize="none" spellcheck="false" />' +
+                    '</div>' +
+                '</div>'
+            );
+        }
+
+        bucketRow.find(".account-field-title").text("Bucket name");
+        bucketRow.find(".account-input-megas4-bucket")
+            .removeAttr("maxlength")
+            .attr("autocomplete", "off")
+            .attr("autocapitalize", "none")
+            .attr("spellcheck", "false");
+
+        /* Force the exact order requested, regardless of stock template order. */
+        credentials.append(loginRow);
+        credentials.append(passwordRow);
+        credentials.append(bucketRow);
+
+        account.attr("data-megas4-layout", "v3");
+        return true;
+    }
+
+    function install() {
+        attempts += 1;
+        if (!(window.jq && window.ASC && ASC.Files && ASC.Files.ThirdParty)) {
+            return false;
+        }
+
+        var thirdParty = ASC.Files.ThirdParty;
+
+        if (!thirdParty.__megaS4V3OriginalAddNewThirdPartyAccount) {
+            thirdParty.__megaS4V3OriginalAddNewThirdPartyAccount = thirdParty.addNewThirdPartyAccount;
+            thirdParty.addNewThirdPartyAccount = function () {
+                var result = thirdParty.__megaS4V3OriginalAddNewThirdPartyAccount.apply(this, arguments);
+                normaliseMegaS4Form();
+                window.setTimeout(normaliseMegaS4Form, 0);
+                return result;
+            };
+        }
+
+        if (!observer && window.MutationObserver) {
+            var target = document.getElementById("thirdPartyAccountList") || document.body;
+            observer = new MutationObserver(function () {
+                normaliseMegaS4Form();
+            });
+            observer.observe(target, { childList: true, subtree: true });
+        }
+
+        normaliseMegaS4Form();
+        thirdParty.__megaS4V3Installed = true;
+        return true;
+    }
+
+    function schedule(delay) {
+        if (timer || attempts >= MAX_ATTEMPTS) {
+            return;
+        }
+        timer = window.setTimeout(function () {
+            timer = null;
+            if (!install() && attempts < MAX_ATTEMPTS) {
+                schedule(250);
+            }
+        }, delay);
+    }
+
+    schedule(0);
+})();
