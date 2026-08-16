@@ -1,0 +1,28 @@
+# Local/editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build/runtime output
+bin/
+obj/
+dist/
+build/
+coverage/
+*.log
+*.tmp
+*.bak
+
+# Secrets / local configuration
+.env
+.env.*
+*.secret
+*.secrets
+credentials.json
+secrets.json
+
+# Runtime patch state / downloads
+worktree/
+artifacts/
