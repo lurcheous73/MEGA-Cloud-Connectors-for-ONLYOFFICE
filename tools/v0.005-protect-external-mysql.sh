@@ -21,8 +21,12 @@ fail(){ echo "FAIL: $*" >&2; exit 1; }
 branch(){ git -C "$REPO" rev-parse --abbrev-ref HEAD; }
 worktree_clean(){ [[ -z "$(git -C "$REPO" status --porcelain)" ]]; }
 live_dll_hash(){ docker exec "$C" sha256sum "$LIVE_DLL" | awk '{print $1}'; }
-plain_count(){ docker exec "$C" sh -lc "grep -Ec '^[[:space:]]*mysqladmin shutdown[[:space:]]*$' '$TARGET' || true"; }
-safe_count(){ docker exec "$C" sh -lc "grep -Fxc '$SAFE_CMD' '$TARGET' || true"; }
+plain_count(){
+  docker exec "$C" sh -lc "awk '/^[[:space:]]*mysqladmin shutdown[[:space:]]*\$/ {n++} END {print n+0}' '$TARGET'"
+}
+safe_count(){
+  docker exec "$C" sh -lc "awk '/^[[:space:]]*mysqladmin --no-defaults --protocol=socket --socket=\\/var\\/run\\/mysqld\\/mysqld.sock shutdown \\|\\| true[[:space:]]*\$/ {n++} END {print n+0}' '$TARGET'"
+}
 
 preflight_common(){
   [[ -d "$REPO/.git" ]] || fail "repo missing: $REPO"
@@ -70,7 +74,7 @@ install(){
   [[ "$(plain_count)" == "2" ]] || fail "expected exactly two plain mysqladmin shutdown lines"
   [[ "$(safe_count)" == "0" ]] || fail "safe command already present unexpectedly"
 
-  local stamp backup tmp patched
+  local stamp backup tmp patched patched_safe_count
   stamp="$(date +%Y%m%d-%H%M%S)"
   backup="$BACKUP_ROOT/brimstone-communityserver-mysql-protect-$stamp"
   mkdir -p "$backup"
@@ -95,8 +99,9 @@ install(){
   ' "$tmp" > "$patched" || fail "failed to produce exact two-line patch"
 
   bash -n "$patched" || fail "patched run script fails bash syntax validation"
-  [[ "$(grep -Ec '^[[:space:]]*mysqladmin shutdown[[:space:]]*$' "$patched" || true)" == "0" ]] || fail "patched temp still contains plain shutdown"
-  [[ "$(grep -Fxc "$SAFE_CMD" "$patched" || true)" == "2" ]] || fail "patched temp does not contain exactly two safe commands"
+  [[ "$(awk '/^[[:space:]]*mysqladmin shutdown[[:space:]]*$/ {n++} END {print n+0}' "$patched")" == "0" ]] || fail "patched temp still contains plain shutdown"
+  patched_safe_count="$(awk '/^[[:space:]]*mysqladmin --no-defaults --protocol=socket --socket=\/var\/run\/mysqld\/mysqld.sock shutdown \|\| true[[:space:]]*$/ {n++} END {print n+0}' "$patched")"
+  [[ "$patched_safe_count" == "2" ]] || fail "patched temp does not contain exactly two safe commands"
 
   docker cp "$patched" "$C:$TARGET" >/dev/null
   docker exec "$C" chmod 755 "$TARGET"
@@ -146,7 +151,7 @@ test_restart(){
   [[ "$(plain_count)" == "0" ]] || fail "protection not installed: plain shutdown remains"
   [[ "$(safe_count)" == "2" ]] || fail "protection not installed: expected two safe commands"
 
-  local before after started deadline
+  local before after started deadline elapsed
   before="$(docker inspect -f '{{.RestartCount}}' "$DB")"
   started="$(docker inspect -f '{{.State.StartedAt}}' "$DB")"
 
@@ -159,25 +164,27 @@ test_restart(){
   docker restart "$C" >/dev/null
 
   deadline=$((SECONDS + 180))
+  elapsed=0
   while (( SECONDS < deadline )); do
     after="$(docker inspect -f '{{.RestartCount}}' "$DB" 2>/dev/null || echo unavailable)"
-    [[ "$after" == "$before" ]] || {
+    if [[ "$after" != "$before" ]]; then
       echo "FAIL: MySQL restart count changed from $before to $after"
       echo "Restoring original run script immediately (no further restart)..."
       rollback || true
       return 1
-    }
+    fi
 
-    if [[ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null || true)" == "true" ]]; then
-      # CommunityServer previously needed ~84s to warm. 120s with DB unchanged is
-      # sufficient to prove both startup mysqladmin sites have passed harmlessly.
-      if (( SECONDS >= 120 )); then
-        echo "PASS: MySQL restart count remained $before for 120 seconds"
-        echo "PASS: MySQL StartedAt unchanged: $(docker inspect -f '{{.State.StartedAt}}' "$DB")"
-        echo "CommunityServer running: $(docker inspect -f '{{.State.Running}}' "$C")"
-        echo "Connector DLL: $(live_dll_hash)"
-        return 0
-      fi
+    elapsed=$((elapsed + 5))
+    if (( elapsed % 30 == 0 )); then
+      echo "INFO: ${elapsed}s — MySQL restart count still $before"
+    fi
+
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null || true)" == "true" ]] && (( elapsed >= 120 )); then
+      echo "PASS: MySQL restart count remained $before for ${elapsed} seconds"
+      echo "PASS: MySQL StartedAt unchanged: $(docker inspect -f '{{.State.StartedAt}}' "$DB")"
+      echo "CommunityServer running: $(docker inspect -f '{{.State.Running}}' "$C")"
+      echo "Connector DLL: $(live_dll_hash)"
+      return 0
     fi
     sleep 5
   done
