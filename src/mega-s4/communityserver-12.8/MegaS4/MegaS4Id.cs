@@ -5,12 +5,13 @@ namespace ASC.Files.Thirdparty.MegaS4
 {
     internal static class MegaS4Id
     {
-        // ONLYOFFICE 12.8's Teamlab MappingID() only hashes a fixed set of
-        // recognised third-party prefixes (including "sbox").  Using a
-        // collision-safe sbox-megas4 prefix makes MEGA S4 IDs participate in
-        // the native MD5 mapping path without matching SharpBox's own
-        // ^sbox-\d+ selector.
-        private const string Prefix = "sbox-megas4-";
+        // BRIMSTONE CUSTOM CODE.
+        // ONLYOFFICE 12.8's browser accepts third-party entry IDs shaped as
+        // letters-digits[-payload], while Teamlab MappingID() hashes any ID
+        // beginning with "sbox".  "sboxmega-<linkId>" therefore satisfies the
+        // browser contract and uses the native MD5 mapping path, but cannot
+        // match SharpBox's own ^sbox-\d+ selector.
+        private const string Prefix = "sboxmega-";
 
         public static string Root(int linkId)
         {
