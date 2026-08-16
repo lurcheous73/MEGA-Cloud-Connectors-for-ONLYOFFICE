@@ -133,7 +133,7 @@ namespace ASC.Files.Thirdparty.MegaS4
         protected string GetAvailableTitle(string requestedTitle, string parentPrefix, Func<string, string, bool> exists)
         {
             if (!exists(requestedTitle, parentPrefix)) return requestedTitle;
-            var re = new Regex(@"( \(((?<index>[0-9])+\)(\.[^\.]*)?)$");
+            var re = new Regex(@"( \((?<index>[0-9]+)\)(\.[^\.]*)?)$");
             var match = re.Match(requestedTitle);
             if (!match.Success)
             {
@@ -146,7 +146,7 @@ namespace ASC.Files.Thirdparty.MegaS4
             {
                 requestedTitle = re.Replace(requestedTitle, delegate(Match m)
                 {
-                    var index = Convert.ToInt32(m.Groups[2].Value);
+                    var index = Convert.ToInt32(m.Groups["index"].Value);
                     var tail = m.Value.Substring(string.Format(" ({0})", index).Length);
                     return string.Format(" ({0}){1}", index + 1, tail);
                 });
