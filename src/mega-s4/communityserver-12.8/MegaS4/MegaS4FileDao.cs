@@ -32,7 +32,7 @@ namespace ASC.Files.Thirdparty.MegaS4
 
         public List<File> GetFiles(IEnumerable<object> fileIds)
         {
-            return fileIds == null ? new List<File>() : fileIds.Select(GetFile).Where(x => x != null).ToList();
+            return fileIds == null ? new List<File>() : fileIds.Select(x => GetFile(x)).Where(x => x != null).ToList();
         }
 
         public List<File> GetFilesFiltered(IEnumerable<object> fileIds, FilterType filterType, bool subjectGroup, Guid subjectID,
@@ -49,7 +49,7 @@ namespace ASC.Files.Thirdparty.MegaS4
         public List<File> GetFiles(object parentId, OrderBy orderBy, FilterType filterType, bool subjectGroup, Guid subjectID,
                                    string searchText, bool searchInContent, string extension, bool withSubfolders = false)
         {
-            var files = Files(GetS4Items(parentId)).Select(ToFile);
+            var files = Files(GetS4Items(parentId)).Select(x => ToFile(x));
             files = ApplyFilters(files, filterType, subjectID, searchText, extension);
             return Order(files, orderBy).ToList();
         }
