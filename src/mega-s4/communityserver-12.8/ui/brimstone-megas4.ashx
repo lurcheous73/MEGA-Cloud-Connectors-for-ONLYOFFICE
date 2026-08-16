@@ -1,1 +1,1 @@
-<%@ WebHandler Language="C#" Class="ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler" %>
+<%@ WebHandler Language="C#" Class="ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler, ASC.Files.Thirdparty" %>
