@@ -136,7 +136,7 @@ LIVE_CONTAINER="$LIVE_CONTAINER" \
 IMAGE="$IMAGE" \
 bash "$VERIFY" "$NEW"
 
-docker run --rm --entrypoint /bin/bash -v "$BIN:/candidate:ro" "$IMAGE" -s <<'CHECK'
+docker run --rm -i --entrypoint /bin/bash -v "$BIN:/candidate:ro" "$IMAGE" -s <<'CHECK'
 set -euo pipefail
 DLL=/candidate/ASC.Files.Thirdparty.dll
 TYPES="$(monodis --typedef "$DLL")"
