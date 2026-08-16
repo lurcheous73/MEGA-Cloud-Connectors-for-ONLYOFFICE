@@ -1,0 +1,86 @@
+diff --git a/module/ASC.Files.Thirdparty/ProviderAccountDao.cs b/module/ASC.Files.Thirdparty/ProviderAccountDao.cs
+--- a/module/ASC.Files.Thirdparty/ProviderAccountDao.cs
++++ b/module/ASC.Files.Thirdparty/ProviderAccountDao.cs
+@@
+ using ASC.Files.Thirdparty.GoogleDrive;
++using ASC.Files.Thirdparty.MegaS4;
+ using ASC.Files.Thirdparty.OneDrive;
+@@
+             GoogleDrive,
++            MegaS4,
+             OneDrive,
+@@
+             if (key == ProviderTypes.OneDrive)
+             {
+                 return new OneDriveProviderInfo(
+@@
+                     createOn);
+             }
++
++            if (key == ProviderTypes.MegaS4)
++            {
++                string megaS4Secret;
++                try
++                {
++                    megaS4Secret = DecryptPassword(input[4] as string);
++                }
++                catch (Exception e)
++                {
++                    Global.Logger.Error(string.Format("DecryptPassword error: linkId = {0} , user = {1}", id, SecurityContext.CurrentAccount.ID), e);
++                    return null;
++                }
++
++                return new MegaS4ProviderInfo(
++                    id,
++                    key.ToString(),
++                    providerTitle,
++                    input[3] as string,
++                    megaS4Secret,
++                    input[9] as string,
++                    token,
++                    owner,
++                    folderType,
++                    createOn);
++            }
+@@
+                 case ProviderTypes.SharePoint:
+                 case ProviderTypes.WebDav:
++                case ProviderTypes.MegaS4:
+                     break;
+
+diff --git a/module/ASC.Files.Thirdparty/ProviderDao/ProviderDaoBase.cs b/module/ASC.Files.Thirdparty/ProviderDao/ProviderDaoBase.cs
+--- a/module/ASC.Files.Thirdparty/ProviderDao/ProviderDaoBase.cs
++++ b/module/ASC.Files.Thirdparty/ProviderDao/ProviderDaoBase.cs
+@@
+ using ASC.Files.Thirdparty.GoogleDrive;
++using ASC.Files.Thirdparty.MegaS4;
+ using ASC.Files.Thirdparty.OneDrive;
+@@
+             Selectors.Add(new DropboxDaoSelector());
+             Selectors.Add(new OneDriveDaoSelector());
++            Selectors.Add(new MegaS4DaoSelector());
+         }
+
+diff --git a/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj b/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj
+--- a/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj
++++ b/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj
+@@
+     <Compile Include="GoogleDrive\\GoogleDriveTagDao.cs" />
++    <Compile Include="MegaS4\\MegaS4Auth.cs" />
++    <Compile Include="MegaS4\\MegaS4DaoBase.cs" />
++    <Compile Include="MegaS4\\MegaS4DaoSelector.cs" />
++    <Compile Include="MegaS4\\MegaS4Entry.cs" />
++    <Compile Include="MegaS4\\MegaS4FileDao.cs" />
++    <Compile Include="MegaS4\\MegaS4FolderDao.cs" />
++    <Compile Include="MegaS4\\MegaS4Id.cs" />
++    <Compile Include="MegaS4\\MegaS4Options.cs" />
++    <Compile Include="MegaS4\\MegaS4ProviderInfo.cs" />
++    <Compile Include="MegaS4\\MegaS4SecurityDao.cs" />
++    <Compile Include="MegaS4\\MegaS4Storage.cs" />
++    <Compile Include="MegaS4\\MegaS4TagDao.cs" />
+@@
+   <ItemGroup>
++    <PackageReference Include="AWSSDK.S3">
++      <Version>4.0.19.2</Version>
++    </PackageReference>
+     <PackageReference Include="AppLimit.CloudComputing.SharpBox">
