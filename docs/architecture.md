@@ -18,6 +18,15 @@ These connectors are deliberately separate from backend/static storage and backu
 - Treat install, status and rollback as first-class operations.
 - Refuse unsupported ONLYOFFICE builds instead of patching blindly.
 - Develop and test each provider independently.
+- Ship both Brimstone connectors from this repository as one release unit.
+
+## Release/install topology
+
+Development and testing may remain connector-specific, but the production operator path is one repository pull followed by one Brimstone installer that installs or upgrades **both MEGA S4 and MEGA Cloud**.
+
+The production installer must own shared preflight, dependency installation, backup, minimum-scope restart, health checks and rollback. A connector-specific failure during combined install must fail the release rather than silently leaving a half-upgraded pair.
+
+The detailed contract is recorded in `docs/BRIMSTONE-COMBINED-INSTALL.md`.
 
 ## MEGA Cloud path
 
@@ -36,6 +45,8 @@ Expected adapter responsibilities include:
 - handling large files and transient failures
 
 No implementation decision about credentials or session persistence is considered final until the current ONLYOFFICE provider code and MEGA authentication model have been mapped.
+
+Any native MEGA SDK dependency selected for the Cloud connector must ultimately be version-pinned and deployed by the same Brimstone production installer; the operator must not maintain a second checkout or manual SDK installation.
 
 ## MEGA S4 path
 
