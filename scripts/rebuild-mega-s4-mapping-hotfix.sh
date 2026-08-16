@@ -137,37 +137,36 @@ CANDIDATE_HASH="$(sha256sum "$NEW" | awk '{print $1}')"
 
 echo
 echo "=== CLR / PREFIX VALIDATION ==="
-docker run --rm \
+docker run --rm -i \
     --entrypoint /bin/bash \
     -v "$BIN:/candidate:ro" \
-    "$IMAGE" \
-    -lc '
-        set -euo pipefail
-        DLL=/candidate/ASC.Files.Thirdparty.dll
+    "$IMAGE" -s <<'INNER'
+set -euo pipefail
+DLL=/candidate/ASC.Files.Thirdparty.dll
 
-        monodis --assembly "$DLL" | grep -q "Name:          ASC.Files.Thirdparty"
-        TYPES="$(monodis --typedef "$DLL")"
-        for t in MegaS4Auth MegaS4DaoSelector MegaS4ProviderInfo MegaS4Storage MegaS4FileDao MegaS4FolderDao MegaS4SecurityDao MegaS4TagDao; do
-            printf "%s\n" "$TYPES" | grep -q "ASC.Files.Thirdparty.MegaS4.$t" \
-                || { echo "FAIL - missing CLR type $t" >&2; exit 1; }
-        done
+monodis --assembly "$DLL" | grep -q "Name:          ASC.Files.Thirdparty"
+TYPES="$(monodis --typedef "$DLL")"
+for t in MegaS4Auth MegaS4DaoSelector MegaS4ProviderInfo MegaS4Storage MegaS4FileDao MegaS4FolderDao MegaS4SecurityDao MegaS4TagDao; do
+    printf "%s\n" "$TYPES" | grep -q "ASC.Files.Thirdparty.MegaS4.$t" \
+        || { echo "FAIL - missing CLR type $t" >&2; exit 1; }
+done
 
-        REFS="$(monodis --assemblyref "$DLL")"
-        check_ref() {
-            local name="$1"
-            printf "%s\n" "$REFS" | awk -v wanted="$name" '
-                /^[0-9]+: Version=/ { version=$0 }
-                $0 ~ "Name=" wanted { if (version ~ /Version=4\.0\.0\.0/) found=1 }
-                END { exit(found ? 0 : 1) }
-            '
-        }
-        check_ref AWSSDK.S3 || { echo "FAIL - AWSSDK.S3 4.0.0.0 reference missing" >&2; exit 1; }
-        check_ref AWSSDK.Core || { echo "FAIL - AWSSDK.Core 4.0.0.0 reference missing" >&2; exit 1; }
-
-        monodis --userstrings "$DLL" | grep -Fq "sbox-megas4-" \
-            || { echo "FAIL - mapping-safe sbox-megas4 prefix absent from CLR user strings" >&2; exit 1; }
-        echo "PASS - mapping-safe sbox-megas4 prefix embedded"
+REFS="$(monodis --assemblyref "$DLL")"
+check_ref() {
+    local name="$1"
+    printf "%s\n" "$REFS" | awk -v wanted="$name" '
+        /^[0-9]+: Version=/ { version=$0 }
+        $0 ~ "Name=" wanted { if (version ~ /Version=4\.0\.0\.0/) found=1 }
+        END { exit(found ? 0 : 1) }
     '
+}
+check_ref AWSSDK.S3 || { echo "FAIL - AWSSDK.S3 4.0.0.0 reference missing" >&2; exit 1; }
+check_ref AWSSDK.Core || { echo "FAIL - AWSSDK.Core 4.0.0.0 reference missing" >&2; exit 1; }
+
+monodis --userstrings "$DLL" | grep -Fq "sbox-megas4-" \
+    || { echo "FAIL - mapping-safe sbox-megas4 prefix absent from CLR user strings" >&2; exit 1; }
+echo "PASS - mapping-safe sbox-megas4 prefix embedded"
+INNER
 
 echo
 echo "============================================================"
