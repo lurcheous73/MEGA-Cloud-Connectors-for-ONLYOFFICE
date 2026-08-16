@@ -1,23 +1,40 @@
-/* MEGA S4 LIVE EXTENSION v1
+/* MEGA S4 LIVE EXTENSION v2
  * CommunityServer 12.8 Files/Connected Clouds integration.
  *
- * This extension deliberately reuses ONLYOFFICE's native ThirdParty account
- * machinery. Access key -> login, secret key -> password, endpoint -> url,
- * and bucket/region/path-style/TLS metadata -> encrypted token.
+ * v2 deliberately does not trust page-load timing. It retries until ONLYOFFICE's
+ * jq alias, ASC.Files.ThirdParty object and popup DOM are all present, and it
+ * re-ensures the MEGA S4 tile immediately before the stock popup opens.
+ *
+ * Access key -> login, secret key -> password, endpoint -> url, and
+ * bucket/region/path-style/TLS metadata -> encrypted token.
  */
 (function () {
-    if (window.__megaS4OnlyOfficeExtensionInstalled) {
+    if (window.__megaS4OnlyOfficeExtensionV2Loaded) {
         return;
     }
-    window.__megaS4OnlyOfficeExtensionInstalled = true;
+    window.__megaS4OnlyOfficeExtensionV2Loaded = true;
 
     var ENDPOINT = "https://s3.g.megas4.com";
     var REGION = "g";
+    var MAX_ATTEMPTS = 120;
+    var attempts = 0;
+    var timer = null;
 
     function showError(message) {
         if (window.ASC && ASC.Files && ASC.Files.UI) {
             ASC.Files.UI.displayInfoPanel(message, true);
         }
+    }
+
+    function prerequisitesReady() {
+        return !!(
+            window.jq &&
+            window.ASC &&
+            ASC.Files &&
+            ASC.Files.ThirdParty &&
+            ASC.Files.ThirdParty.thirdPartyList &&
+            document.getElementById("thirdPartyNewAccount")
+        );
     }
 
     function customiseMegaS4Account() {
@@ -52,9 +69,32 @@
         }
     }
 
+    function ensureTile(thirdParty) {
+        var host = jq("#thirdPartyNewAccount .clearFix").first();
+        if (!host.length) {
+            return false;
+        }
+
+        var existing = host.find('.add-account-button[data-provider="MegaS4"]');
+        if (existing.length) {
+            return true;
+        }
+
+        var tile = jq(
+            '<span class="add-account-big add-account-button WebDav MegaS4" ' +
+            'data-provider="MegaS4" title="MEGA S4">MEGA S4</span>'
+        );
+
+        host.append(tile);
+        tile.on("click", thirdParty.addAccountButton);
+        return true;
+    }
+
     function installMegaS4() {
-        if (!window.ASC || !ASC.Files || !ASC.Files.ThirdParty || !window.jq) {
-            return;
+        attempts += 1;
+
+        if (!prerequisitesReady()) {
+            return false;
         }
 
         var thirdParty = ASC.Files.ThirdParty;
@@ -66,10 +106,10 @@
             urlRequest: true
         };
 
-        if (!thirdParty.__megaS4OriginalAddNewThirdPartyAccount) {
-            thirdParty.__megaS4OriginalAddNewThirdPartyAccount = thirdParty.addNewThirdPartyAccount;
+        if (!thirdParty.__megaS4V2OriginalAddNewThirdPartyAccount) {
+            thirdParty.__megaS4V2OriginalAddNewThirdPartyAccount = thirdParty.addNewThirdPartyAccount;
             thirdParty.addNewThirdPartyAccount = function (provider) {
-                var result = thirdParty.__megaS4OriginalAddNewThirdPartyAccount.apply(this, arguments);
+                var result = thirdParty.__megaS4V2OriginalAddNewThirdPartyAccount.apply(this, arguments);
                 if (provider && provider.key === "MegaS4") {
                     customiseMegaS4Account();
                 }
@@ -77,14 +117,14 @@
             };
         }
 
-        if (!thirdParty.__megaS4OriginalSaveThirdPartyAccount) {
-            thirdParty.__megaS4OriginalSaveThirdPartyAccount = thirdParty.saveThirdPartyAccount;
+        if (!thirdParty.__megaS4V2OriginalSaveThirdPartyAccount) {
+            thirdParty.__megaS4V2OriginalSaveThirdPartyAccount = thirdParty.saveThirdPartyAccount;
             thirdParty.saveThirdPartyAccount = function (obj) {
                 var account = jq(obj).parents(".account-row");
                 var providerKey = (account.find(".account-hidden-provider-key").val() || "").trim();
 
                 if (providerKey !== "MegaS4") {
-                    return thirdParty.__megaS4OriginalSaveThirdPartyAccount.apply(this, arguments);
+                    return thirdParty.__megaS4V2OriginalSaveThirdPartyAccount.apply(this, arguments);
                 }
 
                 var providerId = parseInt(account.find(".account-hidden-provider-id").val(), 10);
@@ -145,20 +185,36 @@
             };
         }
 
-        var host = jq("#thirdPartyNewAccount .clearFix").first();
-        if (host.length && !host.find(".add-account-button.MegaS4").length) {
-            var tile = jq(
-                '<span class="add-account-big add-account-button WebDav MegaS4" ' +
-                'data-provider="MegaS4" title="MEGA S4">MEGA S4</span>'
-            );
-            host.append(tile);
-            tile.on("click", ASC.Files.ThirdParty.addAccountButton);
+        if (!thirdParty.__megaS4V2OriginalShowThirdPartyNewAccount) {
+            thirdParty.__megaS4V2OriginalShowThirdPartyNewAccount = thirdParty.showThirdPartyNewAccount;
+            thirdParty.showThirdPartyNewAccount = function () {
+                ensureTile(thirdParty);
+                return thirdParty.__megaS4V2OriginalShowThirdPartyNewAccount.apply(this, arguments);
+            };
         }
+
+        ensureTile(thirdParty);
+        thirdParty.__megaS4V2Installed = true;
+        window.__megaS4OnlyOfficeExtensionInstalled = true;
+        return true;
     }
 
-    if (window.jq) {
-        jq(function () {
-            installMegaS4();
-        });
+    function schedule(delay) {
+        if (timer || attempts >= MAX_ATTEMPTS) {
+            return;
+        }
+        timer = window.setTimeout(function () {
+            timer = null;
+            if (!installMegaS4() && attempts < MAX_ATTEMPTS) {
+                schedule(250);
+            }
+        }, delay);
     }
+
+    schedule(0);
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function () { schedule(0); }, { once: true });
+    }
+    window.addEventListener("load", function () { schedule(0); }, { once: true });
 })();
