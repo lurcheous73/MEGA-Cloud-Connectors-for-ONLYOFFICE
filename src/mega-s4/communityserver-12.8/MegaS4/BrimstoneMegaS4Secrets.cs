@@ -4,6 +4,7 @@ using System;
 using ASC.Core;
 using ASC.Core.Common.Configuration;
 using ASC.Files.Core;
+using ASC.Web.Studio.Core;
 
 namespace ASC.Files.Thirdparty.MegaS4
 {
