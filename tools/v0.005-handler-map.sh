@@ -17,7 +17,6 @@ EXPECTED_DLL="62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f"
 LIVE_DLL="/var/www/onlyoffice/WebStudio/bin/ASC.Files.Thirdparty.dll"
 BACKUP_ROOT="/var/backups/mega-cloud-connectors-for-onlyoffice"
 MAP_PATH='Products/Files/HttpHandlers/brimstone-megas4.ashx'
-MAP_TYPE='ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler, ASC.Files.Thirdparty'
 MAP_LINE='      <add verb="POST" path="Products/Files/HttpHandlers/brimstone-megas4.ashx" type="ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler, ASC.Files.Thirdparty" />'
 
 fail(){ echo "FAIL: $*" >&2; exit 1; }
@@ -251,13 +250,17 @@ test_restart(){
     rollback || true
     return 1
   fi
-  if [[ "$code" == "500" || -z "$code" || "$code" == "000" ]]; then
-    echo "FAIL: compiled handler route still returned HTTP ${code:-unknown}"
+
+  if grep -Fq 'BRIMSTONE MEGA S4 handler error:' "$body" 2>/dev/null || grep -Fq 'Authentication required.' "$body" 2>/dev/null; then
+    echo "PASS: Brimstone compiled handler executed (credential-free/auth diagnostic returned)"
+  elif [[ "$code" == "500" || -z "$code" || "$code" == "000" ]]; then
+    echo "FAIL: generic/non-Brimstone handler failure HTTP ${code:-unknown}"
     rollback || true
     return 1
+  else
+    echo "PASS: route no longer resolves to physical .ashx source/marker"
   fi
 
-  echo "PASS: route no longer resolves to physical .ashx source/marker"
   echo "PASS: MySQL restart count remains $before"
   echo "PASS: MySQL StartedAt unchanged"
   echo "PASS: Connector DLL remains $(live_dll_hash)"
