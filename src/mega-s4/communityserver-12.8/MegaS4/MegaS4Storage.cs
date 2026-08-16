@@ -29,6 +29,7 @@ namespace ASC.Files.Thirdparty.MegaS4
             {
                 MaxErrorRetry = 3,
                 ServiceURL = options.ServiceUrl,
+                AuthenticationRegion = options.Region,
                 ForcePathStyle = options.ForcePathStyle,
                 UseHttp = options.UseHttp
             };
@@ -43,8 +44,13 @@ namespace ASC.Files.Thirdparty.MegaS4
 
         public void CheckAccess()
         {
-            // HeadBucket avoids requiring account-wide ListBuckets permission.
-            client.GetACL(new GetACLRequest { BucketName = options.Bucket });
+            // Validate the exact selected bucket and the list permission the
+            // live drive needs, without requiring account-wide ListBuckets or ACL access.
+            client.ListObjectsV2(new ListObjectsV2Request
+            {
+                BucketName = options.Bucket,
+                MaxKeys = 1
+            });
         }
 
         public MegaS4FolderEntry GetRoot()
@@ -168,7 +174,7 @@ namespace ASC.Files.Thirdparty.MegaS4
                 BucketName = options.Bucket,
                 Key = key
             };
-            if (offset > 0) request.ByteRange = new ByteRange(offset);
+            if (offset > 0) request.ByteRange = new ByteRange("bytes=" + offset + "-");
 
             return new ResponseStreamWrapper(client.GetObject(request));
         }
