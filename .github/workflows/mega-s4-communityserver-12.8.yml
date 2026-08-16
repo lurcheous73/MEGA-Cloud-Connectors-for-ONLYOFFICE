@@ -6,12 +6,12 @@ on:
       - feature/mega-s4
     paths:
       - 'src/mega-s4/**'
-      - 'scripts/patch-communityserver-12.8-mega-s4.py'
+      - 'scripts/**'
       - '.github/workflows/mega-s4-communityserver-12.8.yml'
   pull_request:
     paths:
       - 'src/mega-s4/**'
-      - 'scripts/patch-communityserver-12.8-mega-s4.py'
+      - 'scripts/**'
       - '.github/workflows/mega-s4-communityserver-12.8.yml'
   workflow_dispatch:
 
@@ -104,3 +104,20 @@ jobs:
             if (!$project.Contains($item)) { throw "Project does not include $item" }
           }
           Write-Host 'PASS - MEGA S4 provider is present in the exact CommunityServer 12.8 build graph.'
+
+      - name: Record compiled provider hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'upstream/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll'
+          if (!(Test-Path $dll)) { throw "Compiled provider DLL missing: $dll" }
+          Get-Item $dll | Format-List FullName,Length,LastWriteTimeUtc
+          Get-FileHash -Algorithm SHA256 $dll
+
+      - name: Upload compiled MEGA S4 provider DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-s4-communityserver-12.8-provider-${{ github.sha }}
+          path: upstream/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll
+          if-no-files-found: error
+          retention-days: 30
