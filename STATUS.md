@@ -33,6 +33,8 @@ v0.003 adds Dropbox-style external-ID restoration across `ChunkedUploadSession` 
 - A folder named `test` created in ONLYOFFICE appeared in the real MEGA S4 `onlyoffice` bucket.
 - Arbitrary image files uploaded through ONLYOFFICE are written successfully to the MEGA S4 root.
 - Arbitrary image files uploaded through ONLYOFFICE are written successfully inside the `test` subfolder.
+- Uploaded MEGA S4 objects open successfully in ONLYOFFICE view mode.
+- Uploaded MEGA S4 objects download successfully through ONLYOFFICE.
 - The earlier `Can not convert id:` upload failure is fixed by restoring external `sboxmega-*` IDs before an upload session leaves the provider DAO and between non-final chunks.
 - The existing MEGA account survives the v0.002 -> v0.003 DLL deployment unchanged.
 - Provider Delete has previously been proven.
@@ -51,10 +53,11 @@ v0.003 adds Dropbox-style external-ID restoration across `ChunkedUploadSession` 
 3. Create remote folder from ONLYOFFICE — PASS.
 4. Upload arbitrary object to bucket root — PASS.
 5. Upload arbitrary object to subfolder — PASS.
-6. Download arbitrary object — NEXT.
-7. Open DOCX in ONLYOFFICE editor — NEXT.
-8. Save changes back to MEGA S4 — NEXT.
-9. Reopen and verify remote persistence — NEXT.
+6. View arbitrary object through ONLYOFFICE — PASS.
+7. Download arbitrary object through ONLYOFFICE — PASS.
+8. Open DOCX in ONLYOFFICE editor — NEXT.
+9. Save changes back to MEGA S4 — NEXT.
+10. Reopen and verify remote persistence — NEXT.
 
 ## Archive
 
