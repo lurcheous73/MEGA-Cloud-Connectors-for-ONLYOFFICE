@@ -65,7 +65,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "MEGA S4 patcher failed with exit code $LASTEXITCODE" }
           Push-Location $upstream
           try {
-            & git diff --check
+            & git -c core.whitespace=cr-at-eol diff --check
             if ($LASTEXITCODE -ne 0) { throw "git diff --check failed with exit code $LASTEXITCODE" }
             Write-Host '=== INTEGRATION DIFF ==='
             & git diff --stat
