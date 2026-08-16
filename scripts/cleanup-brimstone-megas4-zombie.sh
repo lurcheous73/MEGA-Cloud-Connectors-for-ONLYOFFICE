@@ -10,7 +10,7 @@ COMMUNITY_CONTAINER="${COMMUNITY_CONTAINER:-onlyoffice-community-server}"
 DB_CONTAINER="${DB_CONTAINER:-onlyoffice-mysql-server}"
 DATABASE="${DATABASE:-onlyoffice}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/mega-cloud-connectors-for-onlyoffice}"
-EXPECTED_LIVE_DLL_HASH="${EXPECTED_LIVE_DLL_HASH:-3540c74cde53997e680846bd05c86eedbb678d544f16f56de5fbe916393037f2}"
+EXPECTED_LIVE_DLL_HASH="${EXPECTED_LIVE_DLL_HASH:-a5d6698434ef9a18909aa6a2b42657472d832396a918ae648bee2c63255133d2}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -34,12 +34,13 @@ docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || fail "MySQL container not foun
 
 LIVE_HASH="$(docker exec "$COMMUNITY_CONTAINER" sha256sum /var/www/onlyoffice/WebStudio/bin/ASC.Files.Thirdparty.dll | awk '{print $1}')"
 [[ "$LIVE_HASH" == "$EXPECTED_LIVE_DLL_HASH" ]] || fail "unexpected live Thirdparty DLL: $LIVE_HASH"
-echo "PASS: expected provider-contract live DLL"
+echo "PASS: expected BRIMSTONE v4 live DLL"
 
 COUNT="$(mysql_query "SELECT COUNT(*) FROM files_thirdparty_account WHERE LOWER(provider)='megas4';")"
 [[ "$COUNT" == "1" ]] || fail "expected exactly one MegaS4 provider row, found $COUNT"
 
-ROW="$(mysql_query "SELECT id,tenant_id,provider,customer_title,user_name,user_id,folder_type,create_on,url FROM files_thirdparty_account WHERE LOWER(provider)='megas4';")"
+# Deliberately omit credential values from console output.
+ROW="$(mysql_query "SELECT id,tenant_id,provider,customer_title,LENGTH(user_name),LENGTH(password),LENGTH(token),user_id,folder_type,create_on,url FROM files_thirdparty_account WHERE LOWER(provider)='megas4';")"
 [[ -n "$ROW" ]] || fail "MegaS4 row disappeared during inspection"
 
 ID="$(printf '%s\n' "$ROW" | awk -F '\t' '{print $1}')"
@@ -48,8 +49,8 @@ TENANT="$(printf '%s\n' "$ROW" | awk -F '\t' '{print $2}')"
 [[ "$TENANT" =~ ^[0-9]+$ ]] || fail "invalid tenant id: $TENANT"
 
 echo
-echo "=== FAILED PROVIDER ROW ==="
-printf '%s\n' "$ROW"
+echo "=== FAILED PROVIDER ROW — CREDENTIAL VALUES HIDDEN ==="
+printf '%s\n' "id=$ID tenant=$TENANT provider=MegaS4 access_len=$(printf '%s\n' "$ROW" | awk -F '\t' '{print $5}') encrypted_password_len=$(printf '%s\n' "$ROW" | awk -F '\t' '{print $6}') encrypted_token_len=$(printf '%s\n' "$ROW" | awk -F '\t' '{print $7}')"
 
 MAP_COUNT="$(mysql_query "SELECT COUNT(*) FROM files_thirdparty_id_mapping WHERE tenant_id=$TENANT AND (id LIKE 'sbox-megas4-$ID%' OR id LIKE 'megas4-$ID%' OR hash_id LIKE 'megas4-$ID%');")"
 [[ "$MAP_COUNT" == "0" ]] || fail "provider $ID has $MAP_COUNT MEGA mapping row(s); refusing simple cleanup"
@@ -60,7 +61,7 @@ BACKUP="$BACKUP_ROOT/brimstone-megas4-zombie-${ID}-${STAMP}"
 mkdir -p "$BACKUP"
 chmod 700 "$BACKUP"
 
-# Back up exactly the row that will be removed.
+# Back up exactly the full row that will be removed, including its encrypted fields.
 docker exec -e ID="$ID" -e TENANT="$TENANT" "$DB_CONTAINER" sh -lc '
   mysqldump \
     -uroot -p"$MYSQL_ROOT_PASSWORD" \
@@ -72,10 +73,10 @@ docker exec -e ID="$ID" -e TENANT="$TENANT" "$DB_CONTAINER" sh -lc '
 ' > "$BACKUP/files_thirdparty_account.sql"
 
 [[ -s "$BACKUP/files_thirdparty_account.sql" ]] || fail "backup dump is empty"
-printf '%s\n' "$ROW" > "$BACKUP/provider-row.tsv"
+printf '%s\n' "$ROW" > "$BACKUP/provider-row-metadata.tsv"
 (
   cd "$BACKUP"
-  sha256sum files_thirdparty_account.sql provider-row.tsv > SHA256SUMS
+  sha256sum files_thirdparty_account.sql provider-row-metadata.tsv > SHA256SUMS
   sha256sum -c SHA256SUMS
 )
 echo "PASS: exact provider row backed up to $BACKUP"
