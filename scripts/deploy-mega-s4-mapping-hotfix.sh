@@ -6,7 +6,14 @@ REPO="${REPO:-/opt/mega-cloud-connectors-for-onlyoffice}"
 C="${ONLYOFFICE_CONTAINER:-onlyoffice-community-server}"
 DB="${MYSQL_CONTAINER:-onlyoffice-mysql-server}"
 IMAGE="${IMAGE:-onlyoffice/communityserver:12.8.0.1971}"
-CANDIDATE="${MEGA_S4_DLL:-/opt/communityserver-megas4-dev/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll}"
+CANDIDATE="${MEGA_S4_DLL:-/opt/communityserver-megas4-dev/web/studio/ASC.Files.Thirdparty/bin/ASC.Files.Thirdparty.dll}"
+
+# The normal Linux build currently writes here; retain it as a fallback if the
+# caller did not override MEGA_S4_DLL and the first path is absent.
+if [[ "$CANDIDATE" == "/opt/communityserver-megas4-dev/web/studio/ASC.Files.Thirdparty/bin/ASC.Files.Thirdparty.dll" ]] && [[ ! -s "$CANDIDATE" ]]; then
+    CANDIDATE="/opt/communityserver-megas4-dev/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll"
+fi
+
 LIVE="/var/www/onlyoffice/WebStudio/bin/ASC.Files.Thirdparty.dll"
 
 REQUIRED_FIX_COMMIT="88c77d7b82c5228e2bea34d95ae9866d8223ec3f"
@@ -36,16 +43,23 @@ old_mapping_rows() {
     ' 2>/dev/null | tr -d '\r'
 }
 
+hash_container_file_even_if_stopped() {
+    local container="$1" path="$2" tmp
+    tmp="$(mktemp /tmp/megas4-dll.XXXXXX)"
+    docker cp "$container:$path" "$tmp" >/dev/null
+    sha256sum "$tmp" | awk '{print $1}'
+    rm -f "$tmp"
+}
+
 validate_candidate() {
     test -s "$CANDIDATE" || fail "candidate DLL missing: $CANDIDATE"
-    local h
+    local h dir base
     h="$(sha256sum "$CANDIDATE" | awk '{print $1}')"
     [[ "$h" == "$EXPECTED_NEW_HASH" ]] || fail "candidate hash mismatch: $h"
 
-    local dir base
     dir="$(dirname "$CANDIDATE")"
     base="$(basename "$CANDIDATE")"
-    docker run --rm \
+    docker run --rm -i \
       --entrypoint /bin/bash \
       -e DLL_BASE="$base" \
       -v "$dir:/candidate:ro" \
@@ -76,14 +90,13 @@ preflight() {
     [[ "$(docker inspect -f '{{.State.Running}}' "$DB")" == "true" ]] || fail "MySQL is not running"
     [[ "$(docker inspect -f '{{.Config.Image}}' "$C")" == "$IMAGE" ]] || fail "CommunityServer image mismatch"
 
-    local live_hash
+    local live_hash rows mappings
     live_hash="$(chash)"
     [[ "$live_hash" == "$EXPECTED_OLD_HASH" ]] || fail "live DLL is not expected pre-fix build: $live_hash"
     echo "PASS: exact pre-fix live DLL hash"
 
     validate_candidate
 
-    local rows mappings
     rows="$(mega_rows)"
     [[ "$rows" == "0" ]] || fail "MegaS4 account rows exist ($rows); clean them before changing ID scheme"
     echo "PASS: no MegaS4 account rows"
@@ -120,11 +133,11 @@ candidate=$CANDIDATE
 EOF
     sha256sum "$backup/ASC.Files.Thirdparty.dll" >"$backup/SHA256SUMS"
 
-    rollback_on_error() {
+    rollback_on_exit() {
         local rc=$?
-        trap - ERR
-        set +e
-        if [[ "$mutated" == "1" ]]; then
+        trap - EXIT
+        if [[ "$rc" -ne 0 && "$mutated" == "1" ]]; then
+            set +e
             echo
             echo "ERROR after live mutation — restoring previous DLL automatically..." >&2
             docker stop "$C" >/dev/null 2>&1 || true
@@ -141,7 +154,7 @@ EOF
         fi
         exit "$rc"
     }
-    trap rollback_on_error ERR
+    trap rollback_on_exit EXIT
 
     echo
     echo "=== STOP COMMUNITYSERVER ==="
@@ -153,7 +166,7 @@ EOF
     docker cp "$CANDIDATE" "$C:$LIVE" >/dev/null
 
     local stopped_hash
-    stopped_hash="$(docker exec "$C" sha256sum "$LIVE" | awk '{print $1}')"
+    stopped_hash="$(hash_container_file_even_if_stopped "$C" "$LIVE")"
     [[ "$stopped_hash" == "$EXPECTED_NEW_HASH" ]] || fail "copied DLL hash mismatch: $stopped_hash"
     echo "PASS: exact new DLL installed while stopped"
 
@@ -169,7 +182,7 @@ EOF
     printf '%s\n' "$backup" >"$STATE_FILE"
     chmod 600 "$STATE_FILE"
     mutated=0
-    trap - ERR
+    trap - EXIT
 
     echo
     echo "============================================================"
@@ -205,7 +218,7 @@ status_hotfix() {
 
 rollback_hotfix() {
     [[ -s "$STATE_FILE" ]] || fail "no mapping-hotfix state file"
-    local backup rows live_hash
+    local backup rows live_hash restored_hash
     backup="$(cat "$STATE_FILE")"
     test -d "$backup" || fail "backup directory missing: $backup"
     test -s "$backup/ASC.Files.Thirdparty.dll" || fail "backup DLL missing"
@@ -220,8 +233,8 @@ rollback_hotfix() {
 
     docker stop "$C" >/dev/null
     docker cp "$backup/ASC.Files.Thirdparty.dll" "$C:$LIVE" >/dev/null
-    [[ "$(docker exec "$C" sha256sum "$LIVE" | awk '{print $1}')" == "$EXPECTED_OLD_HASH" ]] \
-        || fail "restored DLL hash mismatch while stopped"
+    restored_hash="$(hash_container_file_even_if_stopped "$C" "$LIVE")"
+    [[ "$restored_hash" == "$EXPECTED_OLD_HASH" ]] || fail "restored DLL hash mismatch while stopped: $restored_hash"
     docker start "$C" >/dev/null
     sleep 10
     [[ "$(docker inspect -f '{{.State.Running}}' "$C")" == "true" ]] || fail "CommunityServer failed to restart"
