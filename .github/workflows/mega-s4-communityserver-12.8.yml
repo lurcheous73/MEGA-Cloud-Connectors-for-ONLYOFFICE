@@ -6,12 +6,12 @@ on:
       - feature/mega-s4
     paths:
       - 'src/mega-s4/**'
-      - 'patches/communityserver-12.8/mega-s4-provider-integration.patch'
+      - 'scripts/patch-communityserver-12.8-mega-s4.py'
       - '.github/workflows/mega-s4-communityserver-12.8.yml'
   pull_request:
     paths:
       - 'src/mega-s4/**'
-      - 'patches/communityserver-12.8/mega-s4-provider-integration.patch'
+      - 'scripts/patch-communityserver-12.8-mega-s4.py'
       - '.github/workflows/mega-s4-communityserver-12.8.yml'
   workflow_dispatch:
 
@@ -20,8 +20,8 @@ permissions:
 
 jobs:
   compile:
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on: windows-2022
+    timeout-minutes: 60
 
     steps:
       - name: Checkout connector repository
@@ -34,8 +34,10 @@ jobs:
           ref: fe1fa7babd093969e939ba6ff45a9fee1299dc93
           path: upstream
 
-      - name: Install NuGet
-        uses: NuGet/setup-nuget@v2
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -52,41 +54,36 @@ jobs:
           Write-Host "Staged MEGA S4 source files:"
           Get-ChildItem $dst -File | Sort-Object Name | ForEach-Object { Write-Host "  $($_.Name)" }
 
-      - name: Verify and apply exact upstream integration patch
+      - name: Apply exact CommunityServer integration changes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $patch = Join-Path $env:GITHUB_WORKSPACE 'patches/communityserver-12.8/mega-s4-provider-integration.patch'
-          if (!(Test-Path $patch)) { throw "Integration patch missing: $patch" }
-          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'upstream')
+          $patcher = Join-Path $env:GITHUB_WORKSPACE 'scripts/patch-communityserver-12.8-mega-s4.py'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'upstream'
+          if (!(Test-Path $patcher)) { throw "Patcher missing: $patcher" }
+          & python $patcher $upstream
+          if ($LASTEXITCODE -ne 0) { throw "MEGA S4 patcher failed with exit code $LASTEXITCODE" }
+          Push-Location $upstream
           try {
-            git apply --check --whitespace=error-all $patch
-            git apply --whitespace=error-all $patch
-            git diff --check
+            & git diff --check
+            if ($LASTEXITCODE -ne 0) { throw "git diff --check failed with exit code $LASTEXITCODE" }
+            Write-Host '=== INTEGRATION DIFF ==='
+            & git diff --stat
+            if ($LASTEXITCODE -ne 0) { throw "git diff --stat failed with exit code $LASTEXITCODE" }
           }
           finally {
             Pop-Location
           }
 
-      - name: Restore ASC.Files.Thirdparty dependencies
+      - name: Restore and compile ASC.Files.Thirdparty with project references
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'upstream')
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'upstream'
+          Push-Location $upstream
           try {
-            nuget restore 'module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj' -NonInteractive -Verbosity normal
-          }
-          finally {
-            Pop-Location
-          }
-
-      - name: Compile ASC.Files.Thirdparty
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Push-Location (Join-Path $env:GITHUB_WORKSPACE 'upstream')
-          try {
-            msbuild 'module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj' /m /t:Build /p:Configuration=Release /p:Platform=AnyCPU /v:minimal
+            & msbuild 'module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj' /m /restore /t:Build /p:Configuration=Release /p:Platform=AnyCPU /p:RestoreIgnoreFailedSources=true /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
           }
           finally {
             Pop-Location
@@ -98,10 +95,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $project = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'upstream/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj') -Raw
           $required = @(
-            'MegaS4\\MegaS4Storage.cs',
-            'MegaS4\\MegaS4FileDao.cs',
-            'MegaS4\\MegaS4FolderDao.cs',
-            'MegaS4\\MegaS4ProviderInfo.cs'
+            'MegaS4\MegaS4Storage.cs',
+            'MegaS4\MegaS4FileDao.cs',
+            'MegaS4\MegaS4FolderDao.cs',
+            'MegaS4\MegaS4ProviderInfo.cs'
           )
           foreach ($item in $required) {
             if (!$project.Contains($item)) { throw "Project does not include $item" }
