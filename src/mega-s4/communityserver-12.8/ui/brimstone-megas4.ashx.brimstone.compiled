@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<preserve resultType="2" virtualPath="/Products/Files/HttpHandlers/brimstone-megas4.ashx" assembly="ASC.Files.Thirdparty" type="ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler">
+  <filedeps>
+    <filedep name="/Products/Files/HttpHandlers/brimstone-megas4.ashx" />
+  </filedeps>
+</preserve>
