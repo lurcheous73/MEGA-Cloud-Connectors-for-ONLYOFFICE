@@ -39,11 +39,12 @@ verify_candidate(){
 set -euo pipefail
 DLL=/candidate/ASC.Files.Thirdparty.dll
 TYPES="$(monodis --typedef "$DLL")"
+METHODS="$(monodis --method "$DLL")"
 STRINGS="$(monodis --userstrings "$DLL")"
 REFS="$(monodis --assemblyref "$DLL")"
 grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4FileDao' <<<"$TYPES"
+grep -Fq 'RestoreIds' <<<"$METHODS"
 grep -Fq 'sboxmega-' <<<"$STRINGS"
-grep -Fq 'ProviderFileDao converts third-party IDs' <<<"$STRINGS"
 grep -Fq 'Name=AWSSDK.S3' <<<"$REFS"
 grep -Fq 'Name=AWSSDK.Core' <<<"$REFS"
 echo 'PASS: v0.003 candidate CLR contract verified'
