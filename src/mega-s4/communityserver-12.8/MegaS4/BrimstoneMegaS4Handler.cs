@@ -25,21 +25,28 @@ namespace ASC.Files.Thirdparty.MegaS4
             context.Response.ContentType = "application/json";
             context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
             context.Response.Cache.SetNoStore();
-
-            if (!SecurityContext.IsAuthenticated)
-            {
-                WriteError(context, 401, "Authentication required.");
-                return;
-            }
-
-            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
-            {
-                WriteError(context, 405, "POST required.");
-                return;
-            }
+            context.Response.TrySkipIisCustomErrors = true;
 
             try
             {
+                // BRIMSTONE: raw .ashx requests do not always arrive with the
+                // ONLYOFFICE SecurityContext hydrated. Stock Studio handlers
+                // explicitly bootstrap authentication in this situation.
+                if (!SecurityContext.IsAuthenticated)
+                    ASC.Web.Studio.Global.Authenticate();
+
+                if (!SecurityContext.IsAuthenticated)
+                {
+                    WriteError(context, 401, "Authentication required.");
+                    return;
+                }
+
+                if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteError(context, 405, "POST required.");
+                    return;
+                }
+
                 var action = (context.Request.Form["action"] ?? string.Empty).Trim();
                 if (!string.Equals(action, "list-buckets", StringComparison.Ordinal))
                     throw new ArgumentException("Unsupported BRIMSTONE MEGA S4 action.");
@@ -79,7 +86,9 @@ namespace ASC.Files.Thirdparty.MegaS4
             }
             catch (Exception ex)
             {
-                WriteError(context, 400, ex.Message);
+                // Keep diagnostic text credential-free while making handler/runtime
+                // failures visible to the v4.1 UI instead of Mono's generic HTML 500.
+                WriteError(context, 500, "BRIMSTONE MEGA S4 handler error: " + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
