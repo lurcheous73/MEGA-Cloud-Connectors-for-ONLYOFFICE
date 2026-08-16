@@ -1,30 +1,47 @@
 # MEGA Cloud Connectors for ONLYOFFICE
 
-## Brimstone baseline v0.001
+## Brimstone MEGA S4 — v1.0.0
 
-This branch is the clean development baseline for the Brimstone MEGA S4 connected-drive work on ONLYOFFICE CommunityServer 12.8.
+This is the first working V1 release of the Brimstone MEGA S4 connected-drive integration for ONLYOFFICE CommunityServer 12.8.
 
-Everything added by this project must carry a clear `BRIMSTONE` / `Brimstone` marker in source, namespace, comments, identifiers, or documentation so custom code can be distinguished from upstream ONLYOFFICE code.
+Everything added by this project carries a clear `BRIMSTONE` / `Brimstone` marker so custom code can be distinguished from upstream ONLYOFFICE during upgrades, support and rollback.
 
-### Proven at this baseline
+### Working in v1.0.0
 
-- MEGA S4 credentials are valid against `https://s3.g.megas4.com` using SigV4 region `g`.
-- Direct signed `ListBuckets` returns HTTP 200.
-- Direct signed `ListObjectsV2` against bucket `onlyoffice` returns HTTP 200.
-- ONLYOFFICE can validate, persist and remove a MEGA S4 connected-account row.
-- MEGA S4 credentials/token persistence uses the normal ONLYOFFICE third-party account path.
-- Mapping-safe `sbox-megas4-<providerId>` IDs are retained.
-- One-time import from the existing S3-Compatible backup credentials remains part of the design.
+- Connect MEGA S4 using manually entered access key and secret key.
+- Pull the available S3 bucket list from MEGA S4.
+- Select and connect different buckets from the same S3 account.
+- Save connected-drive accounts through ONLYOFFICE's native third-party account path.
+- Browse bucket and prefix trees in Files.
+- Create remote folders.
+- Upload files to the bucket root and subfolders.
+- View and download remote files.
+- Open documents in the ONLYOFFICE editor.
+- Edit and save documents back to MEGA S4.
+- Close and reopen documents with the saved changes still present remotely.
+- Use the native precompiled ASP.NET handler route for bucket discovery.
+- Restart CommunityServer without shutting down the separate external MySQL container.
 
-### Known broken / incomplete at v0.001
+The live connector DLL accepted for this release remains:
 
-- Connected MEGA S4 root does not yet browse correctly in Files.
-- `Pull buckets` `.ashx` helper currently produces an ASP.NET runtime error before returning Brimstone JSON.
-- Existing-account edit UI falls back to the stock ONLYOFFICE Connection URL / Password form and must be replaced with the proper MEGA S4 editor.
-- Full GET -> editor -> PUT round-trip has not yet been accepted.
+`62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f`
 
-### Deliberately removed
+### Known bug — one
 
-All experimental v2/v3/v4/v4.1/v4.2 deployment, rebuild, repair, upgrade and exact-hash scripts were removed from this baseline. They remain recoverable on the archive branch `archive/pre-v0.001-20260816`.
+**Shared S3-Compatible credential import can pull buckets, but cannot currently Save the connection.**
 
-Start new work from `v0.001`. Do not resurrect old hotfix scripts unless a specific implementation detail is intentionally recovered from the archive.
+When `Import existing S3-Compatible backup credentials` is ticked, the server-side credential import and bucket discovery work, but the client-side Save path still requires visible access-key and secret-key fields. Manual typed credentials are unaffected and Save normally.
+
+This is the only bug listed for v1.0.0. Development of the fix continues separately from the frozen working release.
+
+### Release safety
+
+The pre-release working state remains frozen at:
+
+`baseline/v0.005-99.9pct-20260816`
+
+Commit:
+
+`32c328654a6e266f51ab5e670be2fb224ce62a67`
+
+Further shared-import work continues on `v0.006-shared-import`; the V1 branch is not used for experimental fixes.
