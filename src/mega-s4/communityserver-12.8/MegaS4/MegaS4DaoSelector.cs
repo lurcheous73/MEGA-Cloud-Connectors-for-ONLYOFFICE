@@ -19,7 +19,7 @@ namespace ASC.Files.Thirdparty.MegaS4
         }
 
         public MegaS4DaoSelector()
-            : base(new Regex(@"^sbox-megas4-\d+(?:-[A-Za-z0-9_-]+)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase))
+            : base(new Regex(@"^sboxmega-\d+(?:-[A-Za-z0-9_-]+)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase))
         {
         }
 
