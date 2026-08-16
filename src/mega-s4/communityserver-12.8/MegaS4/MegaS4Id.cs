@@ -5,7 +5,12 @@ namespace ASC.Files.Thirdparty.MegaS4
 {
     internal static class MegaS4Id
     {
-        private const string Prefix = "megas4-";
+        // ONLYOFFICE 12.8's Teamlab MappingID() only hashes a fixed set of
+        // recognised third-party prefixes (including "sbox").  Using a
+        // collision-safe sbox-megas4 prefix makes MEGA S4 IDs participate in
+        // the native MD5 mapping path without matching SharpBox's own
+        // ^sbox-\d+ selector.
+        private const string Prefix = "sbox-megas4-";
 
         public static string Root(int linkId)
         {
