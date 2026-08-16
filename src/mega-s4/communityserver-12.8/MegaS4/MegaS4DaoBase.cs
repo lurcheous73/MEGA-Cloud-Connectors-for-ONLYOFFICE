@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 
 using ASC.Core.Tenants;
 using ASC.Files.Core;
+using ASC.Files.Core.Security;
 using ASC.Web.Files.Classes;
 
 namespace ASC.Files.Thirdparty.MegaS4
@@ -132,7 +133,7 @@ namespace ASC.Files.Thirdparty.MegaS4
         protected string GetAvailableTitle(string requestedTitle, string parentPrefix, Func<string, string, bool> exists)
         {
             if (!exists(requestedTitle, parentPrefix)) return requestedTitle;
-            var re = new Regex(@"( \(((?<index>[0-9])+)\)(\.[^\.]*)?)$");
+            var re = new Regex(@"( \(((?<index>[0-9])+\)(\.[^\.]*)?)$");
             var match = re.Match(requestedTitle);
             if (!match.Success)
             {
