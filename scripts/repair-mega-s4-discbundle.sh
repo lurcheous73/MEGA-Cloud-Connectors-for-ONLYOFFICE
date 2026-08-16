@@ -41,7 +41,10 @@ require_live() {
 public_check() {
     local tmp url code
     tmp="$(mktemp /tmp/megas4-discbundle-http.XXXXXX.js)"
-    url="https://${PORTAL_HOST}/discbundle/files/_t/${NAME}?ver=${PORTAL_VER}&megas4=$(date +%s%N)"
+    # ONLYOFFICE's /discbundle handler is strict about the query string. Validate
+    # the exact URL emitted by the Files page rather than appending cache-busting
+    # parameters, which make this route return 404.
+    url="https://${PORTAL_HOST}/discbundle/files/_t/${NAME}?ver=${PORTAL_VER}"
     code="$(curl -sk --compressed -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' -o "$tmp" -w '%{http_code}' "$url")"
     echo "Public URL: $url"
     echo "HTTP: $code"
