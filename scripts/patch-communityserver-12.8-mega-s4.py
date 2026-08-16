@@ -2,8 +2,9 @@
 """Patch the exact ONLYOFFICE CommunityServer 12.8 baseline for MEGA S4.
 
 This intentionally uses exact, one-occurrence text anchors rather than a fuzzy
-patch.  If upstream moves, the script stops instead of silently modifying the
-wrong code.  It is idempotent for CI/developer re-runs.
+patch. If upstream moves, the script stops instead of silently modifying the
+wrong code. It preserves each upstream file's BOM and line endings and is
+idempotent for CI/developer re-runs.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import subprocess
 import sys
 
 EXPECTED_COMMIT = "fe1fa7babd093969e939ba6ff45a9fee1299dc93"
+UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def run_checked(cwd: pathlib.Path, *args: str) -> str:
@@ -31,16 +33,27 @@ def run_checked(cwd: pathlib.Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
-def read_normalized(path: pathlib.Path) -> str:
-    return path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+def load_text(path: pathlib.Path) -> tuple[str, str, bool]:
+    raw = path.read_bytes()
+    has_bom = raw.startswith(UTF8_BOM)
+    if has_bom:
+        raw = raw[len(UTF8_BOM):]
+    text = raw.decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text.replace("\r\n", "\n"), newline, has_bom
 
 
-def write_normalized(path: pathlib.Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8", newline="\n")
+def save_text(path: pathlib.Path, text: str, newline: str, has_bom: bool) -> None:
+    if newline != "\n":
+        text = text.replace("\n", newline)
+    raw = text.encode("utf-8")
+    if has_bom:
+        raw = UTF8_BOM + raw
+    path.write_bytes(raw)
 
 
 def replace_once(path: pathlib.Path, needle: str, replacement: str, description: str) -> None:
-    text = read_normalized(path)
+    text, newline, has_bom = load_text(path)
     count = text.count(needle)
     if count == 0:
         if replacement in text:
@@ -49,7 +62,7 @@ def replace_once(path: pathlib.Path, needle: str, replacement: str, description:
         raise RuntimeError(f"Anchor not found for {description}: {path}")
     if count != 1:
         raise RuntimeError(f"Anchor occurs {count} times for {description}: {path}")
-    write_normalized(path, text.replace(needle, replacement, 1))
+    save_text(path, text.replace(needle, replacement, 1), newline, has_bom)
     print(f"PATCHED - {description}")
 
 
