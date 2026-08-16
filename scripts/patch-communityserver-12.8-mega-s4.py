@@ -199,7 +199,9 @@ def main() -> int:
         "ASC.Files.Thirdparty AWSSDK.S3 dependency",
     )
 
-    run_checked(root, "git", "diff", "--check")
+    # CommunityServer's tracked files are CRLF. Tell Git that CR at EOL is
+    # intentional so the check reports actual trailing-space errors only.
+    run_checked(root, "git", "-c", "core.whitespace=cr-at-eol", "diff", "--check")
     print("\nPASS - deterministic MEGA S4 backend integration patch applied to CommunityServer 12.8.")
     return 0
 
