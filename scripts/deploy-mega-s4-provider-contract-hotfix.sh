@@ -54,8 +54,9 @@ DLL="/candidate/$DLL_BASE"
 monodis --assembly "$DLL" | grep -q 'Name:          ASC.Files.Thirdparty'
 monodis --typedef "$DLL" | grep -q 'ASC.Files.Thirdparty.MegaS4.MegaS4DaoSelector'
 monodis --userstrings "$DLL" | grep -Fq 'sbox-megas4-'
+monodis --userstrings "$DLL" | grep -Fq 'MEGA S4 id belongs to another provider account.'
 VERIFY
-    echo "PASS: candidate exact hash, CLR type and mapping-safe prefix"
+    echo "PASS: candidate exact hash, CLR type and provider-contract markers"
 }
 
 preflight() {
@@ -67,10 +68,15 @@ preflight() {
     git -C "$REPO" merge-base --is-ancestor "$REQUIRED_FIX_COMMIT" HEAD \
         || fail "checkout does not contain provider-contract fix $REQUIRED_FIX_COMMIT"
     [[ -z "$(git -C "$REPO" status --porcelain)" ]] || fail "connector worktree is not clean"
-    grep -Fq 'MegaS4Id.TryParse(id, out linkId, out key)' \
-        "$REPO/src/mega-s4/communityserver-12.8/MegaS4/MegaS4DaoBase.cs" \
-        || fail "reviewed tolerant DecodeId implementation is absent"
-    echo "PASS: connector checkout contains reviewed provider-contract fix"
+
+    local dao_base="$REPO/src/mega-s4/communityserver-12.8/MegaS4/MegaS4DaoBase.cs"
+    grep -Fq 'MegaS4Id.TryParse(text, out linkId, out key)' "$dao_base" \
+        || fail "reviewed DecodeId full-ID branch is absent"
+    grep -Fq 'if (linkId != ProviderInfo.ID)' "$dao_base" \
+        || fail "reviewed DecodeId provider-account guard is absent"
+    grep -Fq 'return text ?? string.Empty;' "$dao_base" \
+        || fail "reviewed DecodeId native-key passthrough is absent"
+    echo "PASS: connector checkout contains reviewed tolerant DecodeId implementation"
 
     docker inspect "$C" >/dev/null 2>&1 || fail "CommunityServer container missing"
     docker inspect "$DB" >/dev/null 2>&1 || fail "MySQL container missing"
