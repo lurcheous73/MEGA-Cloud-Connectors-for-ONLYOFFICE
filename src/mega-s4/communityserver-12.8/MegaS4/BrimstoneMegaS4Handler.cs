@@ -7,6 +7,7 @@ using System.Web;
 using Amazon.S3;
 
 using ASC.Core;
+using ASC.Web.Studio.Core;
 
 namespace ASC.Files.Thirdparty.MegaS4
 {
@@ -96,7 +97,9 @@ namespace ASC.Files.Thirdparty.MegaS4
             using (var client = new AmazonS3Client(accessKey, secretKey, config))
             {
                 var response = client.ListBuckets();
-                return (response.Buckets ?? new List<S3Bucket>())
+                if (response.Buckets == null) return new List<string>();
+
+                return response.Buckets
                     .Select(bucket => bucket.BucketName)
                     .Where(name => !string.IsNullOrWhiteSpace(name))
                     .Distinct(StringComparer.Ordinal)
