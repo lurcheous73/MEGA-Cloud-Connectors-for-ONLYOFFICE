@@ -47,12 +47,14 @@ preflight(){
   [[ -d "$DEV/.git" ]] || fail "CommunityServer source tree missing: $DEV"
   [[ "$(git -C "$DEV" rev-parse HEAD)" == "$UPSTREAM" ]] || fail "CommunityServer HEAD mismatch"
 
-  grep -Fq 'private const string Prefix = "sboxmega-";' "$SRC/MegaS4Id.cs" || fail "new ID prefix missing"
-  grep -Fq '@"^sboxmega-\\d+' "$SRC/MegaS4DaoSelector.cs" || fail "new selector missing"
-  ! grep -Fq 'private const string Prefix = "sbox-megas4-";' "$SRC/MegaS4Id.cs" || fail "old provider prefix remains active"
+  python3 - "$SRC/MegaS4Id.cs" "$SRC/MegaS4DaoSelector.cs" <<'PY'
+import pathlib, re, sys
+id_source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+selector_source = pathlib.Path(sys.argv[2]).read_text(encoding='utf-8')
+assert 'private const string Prefix = "sboxmega-";' in id_source, 'new ID prefix missing'
+assert r'@"^sboxmega-\d+' in selector_source, 'new selector missing'
+assert 'private const string Prefix = "sbox-megas4-";' not in id_source, 'old provider prefix remains active'
 
-  python3 - <<'PY'
-import re
 browser = re.compile(r'^(\d+|[a-z]+-\d+(-.+)*)')
 sharpbox = re.compile(r'^sbox-\d+(-.*)?$')
 mega = re.compile(r'^sboxmega-\d+(?:-[A-Za-z0-9_-]+)?$', re.I)
@@ -61,6 +63,7 @@ for value in ('sboxmega-8', 'sboxmega-8-Zm9vL2Jhci5kb2N4'):
     assert mega.match(value), value
     assert not sharpbox.match(value), value
 assert not browser.match('sbox-megas4-8')
+print('PASS: v0.002 source ID contract is present')
 print('PASS: new IDs satisfy ONLYOFFICE browser grammar and cannot match SharpBox')
 PY
 
@@ -118,7 +121,9 @@ PY
 
   rm -rf "$DIR/obj"
   mkdir -p "$CACHE"
-  trap 'rm -f "$BUILD"' RETURN
+
+  cleanup_build(){ rm -f "$BUILD"; }
+  trap cleanup_build RETURN
 
   echo
   echo "=== RESTORE + BUILD ==="
@@ -151,12 +156,18 @@ PY
   docker run --rm -i --entrypoint /bin/bash -v "$BIN:/candidate:ro" "$IMAGE" -s <<'CHECK'
 set -euo pipefail
 DLL=/candidate/ASC.Files.Thirdparty.dll
-monodis --typedef "$DLL" | grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4DaoSelector'
-monodis --typedef "$DLL" | grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4ProviderInfo'
-monodis --userstrings "$DLL" | grep -Fq 'sboxmega-'
-! monodis --userstrings "$DLL" | grep -Fq 'sbox-megas4-'
-monodis --assemblyref "$DLL" | grep -Fq 'Name=AWSSDK.S3'
-monodis --assemblyref "$DLL" | grep -Fq 'Name=AWSSDK.Core'
+TYPES="$(monodis --typedef "$DLL")"
+STRINGS="$(monodis --userstrings "$DLL")"
+REFS="$(monodis --assemblyref "$DLL")"
+grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4DaoSelector' <<<"$TYPES"
+grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4ProviderInfo' <<<"$TYPES"
+grep -Fq 'sboxmega-' <<<"$STRINGS"
+if grep -Fq 'sbox-megas4-' <<<"$STRINGS"; then
+  echo 'FAIL: old sbox-megas4 prefix remains in CLR literals' >&2
+  exit 1
+fi
+grep -Fq 'Name=AWSSDK.S3' <<<"$REFS"
+grep -Fq 'Name=AWSSDK.Core' <<<"$REFS"
 echo 'PASS: MEGA provider types present'
 echo 'PASS: browser-compatible sboxmega ID prefix embedded'
 echo 'PASS: old sbox-megas4 prefix absent from CLR literals'
