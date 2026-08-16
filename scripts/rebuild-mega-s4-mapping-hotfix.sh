@@ -32,7 +32,6 @@ echo "============================================================"
 echo " MEGA S4 - NATIVE ID MAPPING HOTFIX REBUILD"
 echo "============================================================"
 
-# Connector checkout must contain the reviewed mapping fix.
 test -d "$REPO/.git" || fail "connector checkout not found: $REPO"
 git -C "$REPO" merge-base --is-ancestor "$FIX_COMMIT" HEAD \
     || fail "connector checkout does not contain mapping fix $FIX_COMMIT"
@@ -54,7 +53,7 @@ echo
 echo "=== VALIDATE REVIEWED SOURCE FIX ==="
 grep -Fq 'private const string Prefix = "sbox-megas4-";' "$SRC/MegaS4Id.cs" \
     || fail "MegaS4Id.cs does not contain native mapping prefix"
-grep -Fq '^sbox-megas4-' "$SRC/MegaS4DaoSelector.cs" \
+grep -Fq '@"^sbox-megas4-\d+' "$SRC/MegaS4DaoSelector.cs" \
     || fail "MegaS4DaoSelector.cs does not contain mapping-safe selector"
 echo "PASS - reviewed mapping-safe ID source present"
 
@@ -154,10 +153,16 @@ docker run --rm \
         done
 
         REFS="$(monodis --assemblyref "$DLL")"
-        printf "%s\n" "$REFS" | grep -A6 "Name=AWSSDK.S3" | grep -q "Version=4.0.0.0" \
-            || { echo "FAIL - AWSSDK.S3 4.0.0.0 reference missing" >&2; exit 1; }
-        printf "%s\n" "$REFS" | grep -A6 "Name=AWSSDK.Core" | grep -q "Version=4.0.0.0" \
-            || { echo "FAIL - AWSSDK.Core 4.0.0.0 reference missing" >&2; exit 1; }
+        check_ref() {
+            local name="$1"
+            printf "%s\n" "$REFS" | awk -v wanted="$name" '
+                /^[0-9]+: Version=/ { version=$0 }
+                $0 ~ "Name=" wanted { if (version ~ /Version=4\.0\.0\.0/) found=1 }
+                END { exit(found ? 0 : 1) }
+            '
+        }
+        check_ref AWSSDK.S3 || { echo "FAIL - AWSSDK.S3 4.0.0.0 reference missing" >&2; exit 1; }
+        check_ref AWSSDK.Core || { echo "FAIL - AWSSDK.Core 4.0.0.0 reference missing" >&2; exit 1; }
 
         monodis --userstrings "$DLL" | grep -Fq "sbox-megas4-" \
             || { echo "FAIL - mapping-safe sbox-megas4 prefix absent from CLR user strings" >&2; exit 1; }
