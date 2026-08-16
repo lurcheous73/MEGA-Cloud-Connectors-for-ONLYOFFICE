@@ -1,75 +1,30 @@
 # MEGA Cloud Connectors for ONLYOFFICE
 
-First-class MEGA storage connectors for ONLYOFFICE Community Server / Workspace.
+## Brimstone baseline v0.001
 
-This project is intentionally separate from `ONLYOFFICE-Community-Storage-Profiles`: that project handles backend/static storage, backup and restore. This repository is for user-facing **Files → Connect cloud storage** integrations.
+This branch is the clean development baseline for the Brimstone MEGA S4 connected-drive work on ONLYOFFICE CommunityServer 12.8.
 
-## Planned connectors
+Everything added by this project must carry a clear `BRIMSTONE` / `Brimstone` marker in source, namespace, comments, identifiers, or documentation so custom code can be distinguished from upstream ONLYOFFICE code.
 
-### MEGA Cloud
+### Proven at this baseline
 
-A connector for normal `mega.nz` cloud storage, intended to sit alongside the existing Dropbox / Nextcloud / ownCloud-style connected storage providers in ONLYOFFICE Files.
+- MEGA S4 credentials are valid against `https://s3.g.megas4.com` using SigV4 region `g`.
+- Direct signed `ListBuckets` returns HTTP 200.
+- Direct signed `ListObjectsV2` against bucket `onlyoffice` returns HTTP 200.
+- ONLYOFFICE can validate, persist and remove a MEGA S4 connected-account row.
+- MEGA S4 credentials/token persistence uses the normal ONLYOFFICE third-party account path.
+- Mapping-safe `sbox-megas4-<providerId>` IDs are retained.
+- One-time import from the existing S3-Compatible backup credentials remains part of the design.
 
-Target capabilities:
+### Known broken / incomplete at v0.001
 
-- authenticate to a MEGA account without storing credentials in source code
-- browse folders and files
-- upload and download
-- create folders
-- rename, move and delete
-- expose file metadata needed by ONLYOFFICE
-- open supported documents through the normal ONLYOFFICE document workflow
-- reconnect / disconnect cleanly
+- Connected MEGA S4 root does not yet browse correctly in Files.
+- `Pull buckets` `.ashx` helper currently produces an ASP.NET runtime error before returning Brimstone JSON.
+- Existing-account edit UI falls back to the stock ONLYOFFICE Connection URL / Password form and must be replaced with the proper MEGA S4 editor.
+- Full GET -> editor -> PUT round-trip has not yet been accepted.
 
-### MEGA S4
+### Deliberately removed
 
-A connector for MEGA S4 object storage, using the S3-compatible API but presented as a normal connected cloud-storage source inside ONLYOFFICE Files.
+All experimental v2/v3/v4/v4.1/v4.2 deployment, rebuild, repair, upgrade and exact-hash scripts were removed from this baseline. They remain recoverable on the archive branch `archive/pre-v0.001-20260816`.
 
-Target capabilities:
-
-- endpoint / region configuration
-- saved access and secret keys via the appropriate ONLYOFFICE credential store
-- list/select buckets
-- browse object prefixes as folders
-- upload/download objects
-- create prefixes/folders where appropriate
-- rename/move through safe copy/delete semantics
-- delete objects
-- path-style support for MEGA S4
-
-## Development approach
-
-1. Map the current ONLYOFFICE Dropbox / Nextcloud / ownCloud connector interfaces and request flow.
-2. Map the official MEGA Cloud API and MEGA S4 S3-compatible behaviour.
-3. Build each connector behind its own provider module.
-4. Keep secrets out of Git, logs and browser persistence.
-5. Provide reversible installer, status and rollback tooling for supported Community Server builds.
-6. Test on a disposable instance before any production deployment.
-
-## Repository layout
-
-```text
-src/
-  mega-cloud/
-  mega-s4/
-patches/
-scripts/
-tests/
-docs/
-```
-
-The implementation will be developed in feature branches and promoted to `main` only after the connector paths are tested.
-
-## Status
-
-Early development / interface discovery.
-
-## Support the work
-
-If this project saves you time or helps keep ONLYOFFICE Community useful, you can support the work here:
-
-**Buy Me a Coffee:** https://buymeacoffee.com/chrisswain
-
-## Licence
-
-Apache License 2.0. See `LICENSE`.
+Start new work from `v0.001`. Do not resurrect old hotfix scripts unless a specific implementation detail is intentionally recovered from the archive.
