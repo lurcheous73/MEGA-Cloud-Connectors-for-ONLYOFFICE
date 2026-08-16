@@ -1,4 +1,4 @@
-# BRIMSTONE MEGA S4 v0.003 status
+# BRIMSTONE MEGA S4 v0.004 status
 
 Baseline date: 2026-08-16
 Upstream CommunityServer baseline: `ONLYOFFICE/CommunityServer@fe1fa7babd093969e939ba6ff45a9fee1299dc93`
@@ -11,18 +11,18 @@ Using burnable test credentials and an independently constructed SigV4 request:
 - `GET https://s3.g.megas4.com/onlyoffice?list-type=2&max-keys=5` -> HTTP 200 `ListBucketResult`.
 - The Amsterdam endpoint also returned HTTP 200, but the connector baseline remains the global `g` endpoint and signing region `g`.
 
-## v0.003 live candidate — PROVEN
+## v0.004 live milestone — PROVEN
 
-Live `ASC.Files.Thirdparty.dll` SHA256:
+Live `ASC.Files.Thirdparty.dll` SHA256 remains:
 
 `62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f`
+
+No DLL change was required to prove the editor-save path after v0.003. v0.004 records the functional acceptance milestone that documents opened from MEGA S4 can be edited in ONLYOFFICE and saved back successfully.
 
 The provider ID namespace remains:
 
 - root: `sboxmega-<providerId>`
 - object/folder: `sboxmega-<providerId>-<base64url-key>`
-
-v0.003 adds Dropbox-style external-ID restoration across `ChunkedUploadSession` boundaries so ONLYOFFICE continues routing subsequent upload requests back to the MEGA S4 DAO.
 
 ## ONLYOFFICE integration — PROVEN
 
@@ -35,6 +35,8 @@ v0.003 adds Dropbox-style external-ID restoration across `ChunkedUploadSession` 
 - Arbitrary image files uploaded through ONLYOFFICE are written successfully inside the `test` subfolder.
 - Uploaded MEGA S4 objects open successfully in ONLYOFFICE view mode.
 - Uploaded MEGA S4 objects download successfully through ONLYOFFICE.
+- Documents stored in MEGA S4 open successfully in the ONLYOFFICE editor.
+- Documents opened from MEGA S4 can be modified and saved successfully through ONLYOFFICE.
 - The earlier `Can not convert id:` upload failure is fixed by restoring external `sboxmega-*` IDs before an upload session leaves the provider DAO and between non-final chunks.
 - The existing MEGA account survives the v0.002 -> v0.003 DLL deployment unchanged.
 - Provider Delete has previously been proven.
@@ -55,9 +57,9 @@ v0.003 adds Dropbox-style external-ID restoration across `ChunkedUploadSession` 
 5. Upload arbitrary object to subfolder — PASS.
 6. View arbitrary object through ONLYOFFICE — PASS.
 7. Download arbitrary object through ONLYOFFICE — PASS.
-8. Open DOCX in ONLYOFFICE editor — NEXT.
-9. Save changes back to MEGA S4 — NEXT.
-10. Reopen and verify remote persistence — NEXT.
+8. Open document in ONLYOFFICE editor — PASS.
+9. Edit and save changes back through ONLYOFFICE — PASS.
+10. Close/reopen and independently verify the edited content was re-read from MEGA S4 — FINAL ACCEPTANCE CHECK.
 
 ## Archive
 
