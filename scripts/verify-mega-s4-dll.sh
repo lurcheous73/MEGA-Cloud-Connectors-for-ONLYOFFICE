@@ -42,64 +42,63 @@ if docker inspect "$LIVE_CONTAINER" >/dev/null 2>&1; then
     echo "PASS - candidate differs from live stock DLL"
 fi
 
-docker run --rm \
+docker run --rm -i \
     --entrypoint /bin/bash \
     -e DLL_BASE="$DLL_BASE" \
     -v "$DLL_DIR:/candidate:ro" \
-    "$IMAGE" \
-    -lc '
-        set -euo pipefail
-        DLL="/candidate/$DLL_BASE"
+    "$IMAGE" -s <<'INNER'
+set -euo pipefail
+DLL="/candidate/$DLL_BASE"
 
-        echo
-        echo "=== ASSEMBLY ==="
-        ASM="$(monodis --assembly "$DLL")"
-        printf "%s\n" "$ASM" | grep -E "^(Name:|Version:)"
-        printf "%s\n" "$ASM" | grep -q "Name:          ASC.Files.Thirdparty" \
-            || { echo "FAIL - wrong assembly name" >&2; exit 1; }
+echo
+echo "=== ASSEMBLY ==="
+ASM="$(monodis --assembly "$DLL")"
+printf "%s\n" "$ASM" | grep -E "^(Name:|Version:)"
+printf "%s\n" "$ASM" | grep -q "Name:          ASC.Files.Thirdparty" \
+    || { echo "FAIL - wrong assembly name" >&2; exit 1; }
 
-        echo
-        echo "=== REQUIRED MEGA S4 TYPES ==="
-        TYPES="$(monodis --typedef "$DLL")"
-        for t in \
-            MegaS4Auth \
-            MegaS4DaoSelector \
-            MegaS4ProviderInfo \
-            MegaS4Storage \
-            MegaS4FileDao \
-            MegaS4FolderDao \
-            MegaS4SecurityDao \
-            MegaS4TagDao; do
-            if printf "%s\n" "$TYPES" | grep -q "ASC.Files.Thirdparty.MegaS4.$t"; then
-                echo "PASS - $t"
-            else
-                echo "FAIL - required CLR type missing: $t" >&2
-                exit 1
-            fi
-        done
+echo
+echo "=== REQUIRED MEGA S4 TYPES ==="
+TYPES="$(monodis --typedef "$DLL")"
+for t in \
+    MegaS4Auth \
+    MegaS4DaoSelector \
+    MegaS4ProviderInfo \
+    MegaS4Storage \
+    MegaS4FileDao \
+    MegaS4FolderDao \
+    MegaS4SecurityDao \
+    MegaS4TagDao; do
+    if printf "%s\n" "$TYPES" | grep -q "ASC.Files.Thirdparty.MegaS4.$t"; then
+        echo "PASS - $t"
+    else
+        echo "FAIL - required CLR type missing: $t" >&2
+        exit 1
+    fi
+done
 
-        echo
-        echo "=== AWS RUNTIME REFERENCES ==="
-        REFS="$(monodis --assemblyref "$DLL")"
-        check_ref() {
-            local name="$1"
-            if printf "%s\n" "$REFS" | awk -v wanted="$name" '
-                /^[0-9]+: Version=/ { version=$0 }
-                $0 ~ "Name=" wanted { if (version ~ /Version=4\.0\.0\.0/) found=1 }
-                END { exit(found ? 0 : 1) }
-            '; then
-                echo "PASS - $name 4.0.0.0"
-            else
-                echo "FAIL - $name 4.0.0.0 reference missing" >&2
-                exit 1
-            fi
-        }
-        check_ref AWSSDK.S3
-        check_ref AWSSDK.Core
+echo
+echo "=== AWS RUNTIME REFERENCES ==="
+REFS="$(monodis --assemblyref "$DLL")"
+check_ref() {
+    local name="$1"
+    if printf "%s\n" "$REFS" | awk -v wanted="$name" '
+        /^[0-9]+: Version=/ { version=$0 }
+        $0 ~ "Name=" wanted { if (version ~ /Version=4\.0\.0\.0/) found=1 }
+        END { exit(found ? 0 : 1) }
+    '; then
+        echo "PASS - $name 4.0.0.0"
+    else
+        echo "FAIL - $name 4.0.0.0 reference missing" >&2
+        exit 1
+    fi
+}
+check_ref AWSSDK.S3
+check_ref AWSSDK.Core
 
-        echo
-        echo "PASS - CLR metadata and AWS references validated"
-    '
+echo
+echo "PASS - CLR metadata and AWS references validated"
+INNER
 
 echo
 echo "============================================================"
