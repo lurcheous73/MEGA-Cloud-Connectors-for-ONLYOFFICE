@@ -26,6 +26,9 @@ BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/mega-cloud-connectors-for-onlyoffice}"
 STATE_DIR="${STATE_DIR:-/var/lib/mega-cloud-connectors-for-onlyoffice}"
 STATE="$STATE_DIR/v0.002-root-browse.state"
 
+# A stale temporary build project is never useful. Clean it on every exit.
+trap 'rm -f "$BUILD"' EXIT
+
 fail(){ echo "FAIL: $*" >&2; exit 1; }
 live_hash(){ docker exec "$C" sha256sum "$LIVE_DLL" | awk '{print $1}'; }
 mysql_scalar(){
@@ -122,9 +125,6 @@ PY
   rm -rf "$DIR/obj"
   mkdir -p "$CACHE"
 
-  cleanup_build(){ rm -f "$BUILD"; }
-  trap cleanup_build RETURN
-
   echo
   echo "=== RESTORE + BUILD ==="
   docker run --rm \
@@ -140,12 +140,12 @@ PY
       msbuild "$PROJECT" /t:Restore /p:RestoreIgnoreFailedSources=true /v:minimal
       REF=/root/.nuget/packages/microsoft.netframework.referenceassemblies.net48/1.0.3/build/.NETFramework/v4.8/System.Net.Http.dll
       test -s "$REF"
-      monodis --assembly "$REF" | grep -q "Version:       4.2.0.0"
+      ASM="$(monodis --assembly "$REF")"
+      grep -Fq "Version:       4.2.0.0" <<<"$ASM"
       msbuild "$PROJECT" /t:Build /p:Configuration=Release /p:Platform=AnyCPU /p:BuildProjectReferences=false /p:RestoreIgnoreFailedSources=true /v:minimal
     '
 
   rm -f "$BUILD"
-  trap - RETURN
   [[ -s "$CANDIDATE" ]] || fail "candidate DLL was not produced"
   local new
   new="$(sha256sum "$CANDIDATE" | awk '{print $1}')"
