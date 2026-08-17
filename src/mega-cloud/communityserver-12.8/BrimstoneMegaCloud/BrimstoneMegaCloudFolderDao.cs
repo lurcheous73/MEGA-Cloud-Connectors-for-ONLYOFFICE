@@ -158,7 +158,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public object GetFolderIDRecent(bool createIfNotExists) { return null; }
         public object GetFolderIDFavorites(bool createIfNotExists) { return null; }
         public object GetFolderIDTemplates(bool createIfNotExists) { return null; }
-        public object GetFolderIDPrivacy(bool createIfNotExists) { return null; }
+        public object GetFolderIDPrivacy(bool createIfNotExists, Guid? userId = null) { return null; }
         public object GetFolderIDTrash(bool createIfNotExists, Guid? userId = null) { return null; }
         public object GetFolderIDProjects(bool createIfNotExists) { return null; }
         public string GetBunchObjectID(object folderID) { return null; }
