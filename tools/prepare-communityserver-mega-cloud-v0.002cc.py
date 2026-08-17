@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BRIMSTONE CUSTOM CODE: add v0.002cc MEGA Cloud sources to prepared CommunityServer 12.8."""
+"""BRIMSTONE CUSTOM CODE: wire v0.002cc MEGA Cloud into prepared CommunityServer 12.8."""
 
 from __future__ import annotations
 
@@ -48,10 +48,14 @@ def main():
     args = ap.parse_args()
     root = args.communityserver_root.resolve()
 
+    account = root / "module/ASC.Files.Thirdparty/ProviderAccountDao.cs"
+    provider_base = root / "module/ASC.Files.Thirdparty/ProviderDao/ProviderDaoBase.cs"
     project = root / "module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj"
     cloud_dir = root / "module/ASC.Files.Thirdparty/BrimstoneMegaCloud"
-    if not project.is_file():
-        raise RuntimeError(f"CommunityServer project missing: {project}")
+
+    for path in (account, provider_base, project):
+        if not path.is_file():
+            raise RuntimeError(f"CommunityServer integration file missing: {path}")
     if not cloud_dir.is_dir():
         raise RuntimeError(f"Brimstone MEGA Cloud source directory missing: {cloud_dir}")
 
@@ -72,13 +76,81 @@ def main():
         if not (cloud_dir / name).is_file():
             raise RuntimeError(f"Brimstone MEGA Cloud source missing: {name}")
 
+    # BRIMSTONE: the S4 source preparer runs immediately before this script, so
+    # these anchors deliberately target the already-prepared S4 integration.
+    replace_once(
+        account,
+        "using ASC.Files.Thirdparty.MegaS4;\nusing ASC.Files.Thirdparty.OneDrive;",
+        "using ASC.Files.Thirdparty.BrimstoneMegaCloud;\nusing ASC.Files.Thirdparty.MegaS4;\nusing ASC.Files.Thirdparty.OneDrive;",
+        "ProviderAccountDao Brimstone MEGA Cloud namespace import",
+    )
+
+    replace_once(
+        account,
+        "            GoogleDrive,\n            MegaS4,\n            OneDrive,",
+        "            GoogleDrive,\n            BrimstoneMegaCloud,\n            MegaS4,\n            OneDrive,",
+        "ProviderAccountDao Brimstone MEGA Cloud provider enum",
+    )
+
+    mega_materialisation = """            // BRIMSTONE CUSTOM CODE: MEGA S4 provider materialisation.
+            if (key == ProviderTypes.MegaS4)
+"""
+    cloud_materialisation = """            // BRIMSTONE CUSTOM CODE: normal MEGA Cloud provider materialisation.
+            // token is ONLY a non-secret Brimstone state-slot locator. The
+            // actual MEGA resumable session remains below the protected HOME.
+            if (key == ProviderTypes.BrimstoneMegaCloud)
+            {
+                return new BrimstoneMegaCloudProviderInfo(
+                    id,
+                    key.ToString(),
+                    providerTitle,
+                    token,
+                    owner,
+                    folderType,
+                    createOn);
+            }
+
+""" + mega_materialisation
+    replace_once(
+        account,
+        mega_materialisation,
+        cloud_materialisation,
+        "ProviderAccountDao Brimstone MEGA Cloud materialisation",
+    )
+
+    replace_once(
+        account,
+        "                case ProviderTypes.SharePoint:\n                case ProviderTypes.WebDav:\n                case ProviderTypes.MegaS4:\n                    break;",
+        "                case ProviderTypes.SharePoint:\n                case ProviderTypes.WebDav:\n                case ProviderTypes.BrimstoneMegaCloud:\n                case ProviderTypes.MegaS4:\n                    break;",
+        "ProviderAccountDao Brimstone MEGA Cloud state-slot handling",
+    )
+
+    replace_once(
+        provider_base,
+        "using ASC.Files.Thirdparty.MegaS4;\nusing ASC.Files.Thirdparty.OneDrive;",
+        "using ASC.Files.Thirdparty.BrimstoneMegaCloud;\nusing ASC.Files.Thirdparty.MegaS4;\nusing ASC.Files.Thirdparty.OneDrive;",
+        "ProviderDaoBase Brimstone MEGA Cloud namespace import",
+    )
+
+    selector_anchor = """            // BRIMSTONE CUSTOM CODE: MEGA S4 connected-drive selector.
+            Selectors.Add(new MegaS4DaoSelector());"""
+    selector_block = selector_anchor + """
+            // BRIMSTONE CUSTOM CODE: normal MEGA Cloud connected-drive selector.
+            Selectors.Add(new BrimstoneMegaCloudDaoSelector());"""
+    replace_once(
+        provider_base,
+        selector_anchor,
+        selector_block,
+        "ProviderDaoBase Brimstone MEGA Cloud selector registration",
+    )
+
     anchor = '    <Compile Include="MegaS4\\MegaS4TagDao.cs" />'
     block = anchor + "\n" + "\n".join(
         f'    <Compile Include="BrimstoneMegaCloud\\{name}" />' for name in required
     )
     replace_once(project, anchor, block, "Brimstone MEGA Cloud v0.002cc compile items")
 
-    print("PASS - Brimstone MEGA Cloud v0.002cc compile-only source integration applied")
+    print("PASS - Brimstone MEGA Cloud v0.002cc provider registration and compile integration applied")
 
 
 if __name__ == "__main__":
