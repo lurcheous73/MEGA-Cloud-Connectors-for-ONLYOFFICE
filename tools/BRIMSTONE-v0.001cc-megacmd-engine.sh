@@ -243,6 +243,50 @@ exec "$PREFIX/usr/bin/mega-cmd"
 '
 }
 
+resume_test_slot() {
+    require_host
+    [[ -x "$MEGACMD_PREFIX/usr/bin/mega-exec" ]] ||
+        fail "MEGAcmd engine is not built; run: bash $0 build"
+
+    local slot
+    slot=$(validate_slot "${1:-test1}")
+    local state="$STATE_ROOT/$slot"
+    local socket="brimstone-${slot}.socket"
+    local session="$state/home/.megaCmd/session"
+
+    [[ -s "$session" ]] ||
+        fail "no saved MEGA session for slot $slot; complete an interactive login first"
+
+    echo "=== BRIMSTONE SAVED-SESSION RESUME TEST ==="
+    echo "slot:       $slot"
+    echo "HOME:       $state/home"
+    echo "socket:     $socket"
+    echo "password:   NOT REQUESTED"
+    echo "live stack: NOT TOUCHED"
+    echo
+
+    docker run --rm \
+        --entrypoint /bin/bash \
+        -v "$ROOT:/work" \
+        -e HOME="/work/build/mega-cloud-v0.001cc/megacmd-state/$slot/home" \
+        -e MEGACMD_SOCKET_NAME="$socket" \
+        "$BUILDER_IMAGE" -lc '
+set -Eeuo pipefail
+PREFIX=/work/build/mega-cloud-v0.001cc/megacmd-prefix
+export PATH="$PREFIX/usr/bin:$PATH"
+export LD_LIBRARY_PATH="$PREFIX/opt/megacmd/lib:${LD_LIBRARY_PATH:-}"
+
+echo "=== WHOAMI FROM SAVED SESSION ==="
+timeout 180 "$PREFIX/usr/bin/mega-whoami"
+
+echo
+echo "=== ROOT FROM SAVED SESSION ==="
+timeout 180 "$PREFIX/usr/bin/mega-ls" /
+'
+
+    info "saved-session resume test completed for slot $slot without supplying a password"
+}
+
 clean_slot() {
     require_host
     local slot
@@ -262,10 +306,11 @@ case "${1:-status}" in
     build) build_engine ;;
     status) status ;;
     shell) shell_slot "${2:-test1}" ;;
+    resume-test) resume_test_slot "${2:-test1}" ;;
     clean-slot) clean_slot "${2:-test1}" ;;
     clean-engine) clean_engine ;;
     *)
-        echo "Usage: $0 {preflight|build|status|shell [slot]|clean-slot [slot]|clean-engine}" >&2
+        echo "Usage: $0 {preflight|build|status|shell [slot]|resume-test [slot]|clean-slot [slot]|clean-engine}" >&2
         exit 2
         ;;
 esac
