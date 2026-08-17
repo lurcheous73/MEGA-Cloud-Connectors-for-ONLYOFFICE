@@ -109,7 +109,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
             return new Folder
             {
-                ID = MakeId(entry.Handle),
+                ID = MakeId(entry),
                 ParentFolderID = MakeId(entry.ParentPath),
                 CreateBy = ProviderInfo.Owner,
                 CreateOn = modified,
@@ -135,7 +135,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
             return new File
             {
-                ID = MakeId(entry.Handle),
+                ID = MakeId(entry),
                 Access = FileShare.None,
                 ContentLength = entry.Size,
                 CreateBy = ProviderInfo.Owner,
