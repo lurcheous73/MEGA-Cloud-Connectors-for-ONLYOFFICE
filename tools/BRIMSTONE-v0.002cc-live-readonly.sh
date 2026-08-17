@@ -260,7 +260,7 @@ EOF
 
     echo "=== SECURE + VERIFY LIVE BRIMSTONE RUNTIME ==="
     docker exec "$C" chmod -R go-rwx "$TARGET_STATE"
-    docker exec "$C" chmod 700 "$TARGET_STATE" "$TARGET_HOME"
+    docker exec "$C" chmod 700 "$(dirname "$TARGET_STATE_ROOT")" "$TARGET_STATE_ROOT" "$TARGET_STATE" "$TARGET_HOME"
     docker exec "$C" test -s "$TARGET_SESSION" || fail "copied live MEGA session missing"
     [[ "$(docker exec "$C" sha256sum "$TARGET_ENGINE/usr/bin/mega-cmd-server" | awk '{print $1}')" == "$EXPECTED_ENGINE_SERVER" ]] || fail "live MEGAcmd server hash mismatch"
 
