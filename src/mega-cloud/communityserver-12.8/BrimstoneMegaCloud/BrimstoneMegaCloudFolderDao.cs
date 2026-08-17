@@ -19,8 +19,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         public Folder GetFolder(object folderId)
         {
-            var handle = DecodeId(folderId);
-            return string.IsNullOrEmpty(handle) ? ToRootFolder() : ToFolder(GetCloudEntry(handle));
+            var remotePath = DecodeId(folderId);
+            return BrimstoneMegaCloudId.NormalizeRemotePath(remotePath) == "/"
+                ? ToRootFolder()
+                : ToFolder(GetCloudEntry(remotePath));
         }
 
         public Folder GetFolder(string title, object parentId)
@@ -84,28 +86,31 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         public List<Folder> GetParentFolders(object folderId)
         {
-            var handle = DecodeId(folderId);
+            var remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(DecodeId(folderId));
+
             var result = new List<Folder> { ToRootFolder() };
-            if (string.IsNullOrEmpty(handle)) return result;
 
-            var chain = new List<Folder>();
-            var guard = new HashSet<string>(StringComparer.Ordinal);
-            while (!string.IsNullOrEmpty(handle))
+            if (remotePath == "/")
+                return result;
+
+            var current = "/";
+
+            foreach (var part in remotePath
+                .Trim('/')
+                .Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (!guard.Add(handle))
-                    throw new InvalidOperationException("Brimstone MEGA Cloud parent cache contains a loop.");
+                current = BrimstoneMegaCloudId.Combine(current, part);
 
-                var entry = ProviderInfo.Client.GetCachedEntry(handle);
-                if (entry == null)
+                var entry = ProviderInfo.Client.GetEntry(current);
+
+                if (entry == null || !entry.IsFolder)
                     throw new InvalidOperationException(
-                        "Brimstone MEGA Cloud breadcrumb metadata is not cached; browse from the root first.");
+                        "Brimstone MEGA Cloud breadcrumb node was not found in the live MEGA namespace.");
 
-                chain.Add(ToFolder(entry));
-                handle = entry.ParentHandle;
+                result.Add(ToFolder(entry));
             }
 
-            chain.Reverse();
-            result.AddRange(chain);
             return result;
         }
 
@@ -125,8 +130,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public object RenameFolder(Folder folder, string newTitle)
         {
             if (folder == null) throw new ArgumentNullException("folder");
-            var handle = DecodeId(folder.ID);
-            if (string.IsNullOrEmpty(handle))
+            var remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(DecodeId(folder.ID));
+
+            if (remotePath == "/")
             {
                 Selector.RenameProvider(ProviderInfo, newTitle);
                 return MakeId(string.Empty);

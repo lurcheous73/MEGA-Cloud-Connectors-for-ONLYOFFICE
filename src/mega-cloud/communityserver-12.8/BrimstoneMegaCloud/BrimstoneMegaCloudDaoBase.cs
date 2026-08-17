@@ -48,14 +48,14 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             return text ?? string.Empty;
         }
 
-        protected string MakeId(string handle)
+        protected string MakeId(string remotePath)
         {
-            return BrimstoneMegaCloudId.Encode(ProviderInfo.ID, handle);
+            return BrimstoneMegaCloudId.Encode(ProviderInfo.ID, remotePath);
         }
 
         protected string MakeId(BrimstoneMegaCloudEntry entry)
         {
-            return entry == null ? null : MakeId(entry.Handle);
+            return entry == null ? null : MakeId(entry.RemotePath);
         }
 
         protected List<BrimstoneMegaCloudEntry> GetCloudItems(object parentId)
@@ -65,20 +65,18 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         protected BrimstoneMegaCloudEntry GetCloudEntry(object id)
         {
-            var handle = DecodeId(id);
-            if (string.IsNullOrEmpty(handle)) return null;
+            var remotePath = DecodeId(id);
 
-            var entry = ProviderInfo.Client.GetCachedEntry(handle);
-            if (entry != null) return entry;
+            if (BrimstoneMegaCloudId.NormalizeRemotePath(remotePath) == "/")
+                return null;
 
-            // BRIMSTONE v0.002cc browse flow starts at the provider root. Warm
-            // root metadata once before treating a direct handle lookup as a miss.
-            ProviderInfo.Client.ListChildren(string.Empty);
-            entry = ProviderInfo.Client.GetCachedEntry(handle);
-            if (entry != null) return entry;
+            var entry = ProviderInfo.Client.GetEntry(remotePath);
 
-            throw new InvalidOperationException(
-                "Brimstone MEGA Cloud node metadata is not cached yet; browse to the node from its parent first.");
+            if (entry == null)
+                throw new InvalidOperationException(
+                    "Brimstone MEGA Cloud node was not found in its live parent listing.");
+
+            return entry;
         }
 
         protected Folder ToRootFolder()
@@ -112,9 +110,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             return new Folder
             {
                 ID = MakeId(entry.Handle),
-                ParentFolderID = string.IsNullOrEmpty(entry.ParentHandle)
-                    ? MakeId(string.Empty)
-                    : MakeId(entry.ParentHandle),
+                ParentFolderID = MakeId(entry.ParentPath),
                 CreateBy = ProviderInfo.Owner,
                 CreateOn = modified,
                 FolderType = FolderType.DEFAULT,
@@ -145,9 +141,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                 CreateBy = ProviderInfo.Owner,
                 CreateOn = modified,
                 FileStatus = FileStatus.None,
-                FolderID = string.IsNullOrEmpty(entry.ParentHandle)
-                    ? MakeId(string.Empty)
-                    : MakeId(entry.ParentHandle),
+                FolderID = MakeId(entry.ParentPath),
                 ModifiedBy = ProviderInfo.Owner,
                 ModifiedOn = modified,
                 NativeAccessor = entry,
@@ -174,7 +168,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         protected static NotSupportedException ReadOnly()
         {
-            return new NotSupportedException("Brimstone MEGA Cloud v0.002cc is read-only.");
+            return new NotSupportedException("Brimstone MEGA Cloud v0.003cc is read-only.");
         }
     }
 }

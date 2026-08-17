@@ -2,13 +2,12 @@ using System;
 
 namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 {
-    // BRIMSTONE CUSTOM CODE.
-    // One immutable-ish view of a MEGA node as returned by the pinned MEGAcmd
-    // browse contract. Handle is the remote identity; names/parents are metadata.
     internal sealed class BrimstoneMegaCloudEntry
     {
         public string Handle { get; set; }
-        public string ParentHandle { get; set; }
+        public string RemotePath { get; set; }
+        public string ParentPath { get; set; }
+
         public string Name { get; set; }
         public string Flags { get; set; }
         public int VersionCount { get; set; }
