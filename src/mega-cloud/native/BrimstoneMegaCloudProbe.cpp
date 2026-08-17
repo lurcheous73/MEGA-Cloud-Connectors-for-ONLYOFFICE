@@ -5,18 +5,17 @@
 
 #include <megaapi.h>
 
-#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <sys/stat.h>
@@ -29,7 +28,6 @@ namespace BrimstoneMegaCloud
 using namespace mega;
 
 static const char* const kDefaultUserAgent = "BrimstoneMegaCloud/0.001cc";
-static const std::chrono::seconds kRequestTimeout(90);
 
 class BrimstoneRequestWaiter final : public MegaRequestListener
 {
@@ -43,10 +41,10 @@ public:
         condition_.notify_all();
     }
 
-    bool Wait(std::chrono::seconds timeout)
+    void Wait()
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        return condition_.wait_for(lock, timeout, [this]() { return finished_; });
+        condition_.wait(lock, [this]() { return finished_; });
     }
 
     int ErrorCode() const
@@ -128,6 +126,7 @@ std::string ErrorSymbol(int code)
         case MegaError::API_EACCESS: return "ACCESS_DENIED";
         case MegaError::API_ENOENT: return "NOT_FOUND";
         case MegaError::API_EOVERQUOTA: return "OVER_QUOTA";
+        case MegaError::API_ESID: return "SESSION_INVALID";
         default: return "MEGA_API_ERROR";
     }
 }
@@ -209,27 +208,17 @@ std::string DumpSession(MegaApi& api)
     return session;
 }
 
-bool RunRequest(const std::string& stage,
-                const std::function<void(BrimstoneRequestWaiter*)>& start,
+bool RunRequest(const std::function<void(BrimstoneRequestWaiter*)>& start,
                 int& errorCode,
                 std::string& errorText)
 {
     BrimstoneRequestWaiter waiter;
     start(&waiter);
-    if (!waiter.Wait(kRequestTimeout))
-    {
-        errorCode = -10001;
-        errorText = "Timed out waiting for MEGA SDK request completion";
-        return false;
-    }
+    waiter.Wait();
 
     errorCode = waiter.ErrorCode();
     errorText = waiter.ErrorText();
-    if (errorCode != MegaError::API_OK)
-    {
-        return false;
-    }
-    return true;
+    return errorCode == MegaError::API_OK;
 }
 
 void EmitRoot(MegaApi& api, const std::string& mode, bool sessionSaved)
@@ -252,6 +241,7 @@ void EmitRoot(MegaApi& api, const std::string& mode, bool sessionSaved)
               << ",\"root_handle\":\"" << HandleText(root->getHandle())
               << "\",\"children\":[";
 
+    bool emitted = false;
     for (int i = 0; i < children->size(); ++i)
     {
         MegaNode* node = children->get(i);
@@ -260,13 +250,14 @@ void EmitRoot(MegaApi& api, const std::string& mode, bool sessionSaved)
             continue;
         }
 
-        if (i > 0)
+        if (emitted)
         {
             std::cout << ',';
         }
+        emitted = true;
 
         const char* rawName = node->getName();
-        const std::string name = rawName ? rawName : std::string();
+        const std::string name = rawName ? std::string(rawName) : std::string();
         const bool isFile = node->isFile();
         const bool isFolder = node->isFolder();
         const int64_t size = isFile ? node->getSize() : 0;
@@ -314,7 +305,6 @@ int Run(const std::string& mode)
         const std::string mfa = GetEnv("BRIMSTONE_MEGA_MFA", false);
 
         const bool loginOk = RunRequest(
-            "login",
             [&](BrimstoneRequestWaiter* listener)
             {
                 if (mfa.empty())
@@ -339,7 +329,6 @@ int Run(const std::string& mode)
     {
         const std::string session = ReadSessionFile(sessionFile);
         const bool loginOk = RunRequest(
-            "fast-login",
             [&](BrimstoneRequestWaiter* listener)
             {
                 api.fastLogin(session.c_str(), listener);
@@ -359,7 +348,6 @@ int Run(const std::string& mode)
     }
 
     const bool fetchOk = RunRequest(
-        "fetch-nodes",
         [&](BrimstoneRequestWaiter* listener)
         {
             api.fetchNodes(listener);
