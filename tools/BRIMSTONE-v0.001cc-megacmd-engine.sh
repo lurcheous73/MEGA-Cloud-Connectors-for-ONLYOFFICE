@@ -170,7 +170,9 @@ EXEC="$MEGACMD_PREFIX/usr/bin/mega-exec"
 
 echo
 echo "=== BRIMSTONE OFFICIAL MEGACMD ENGINE BUILT ==="
-"$SERVER" --version 2>/dev/null || true
+echo "MEGAcmd pinned version: $BRIMSTONE_MEGACMD_VERSION"
+echo "MEGAcmd commit:         $BRIMSTONE_MEGACMD_COMMIT"
+echo "MEGA SDK commit:        $BRIMSTONE_MEGACMD_SDK_COMMIT"
 sha256sum "$SERVER" "$SHELL" "$EXEC"
 echo
 echo "=== BRIMSTONE RUNTIME DEPENDENCIES ==="
