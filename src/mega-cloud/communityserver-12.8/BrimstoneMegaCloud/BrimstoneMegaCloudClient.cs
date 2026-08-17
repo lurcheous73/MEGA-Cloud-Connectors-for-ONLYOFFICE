@@ -13,6 +13,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         private const int CommandTimeoutMilliseconds = 180000;
         private const uint Mode0700 = 448;
 
+        // BRIMSTONE: this root belongs to the separate MEGA S4 provider.
+        // It is globally unavailable through the normal MEGA Cloud provider.
+        private const string ReservedS4RootName = "S4 Object storage";
+
         private readonly string enginePrefix;
         private readonly string stateRoot;
         private readonly string stateSlot;
@@ -83,6 +87,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         {
             parentPath = BrimstoneMegaCloudId.NormalizeRemotePath(parentPath);
 
+            // Fail closed even if somebody constructs a direct ONLYOFFICE id
+            // for the reserved S4 subtree.
+            DenyReservedPath(parentPath);
+
             var stdout = RunReadOnly(
                 "ls -l --show-handles --time-format=ISO6081_WITH_TIME "
                 + QuoteArgument(parentPath));
@@ -101,10 +109,15 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             {
                 var excluded = LoadExcludedRootHandles();
 
-                if (excluded.Count != 0)
-                    entries = entries
-                        .Where(x => !excluded.Contains(x.Handle))
-                        .ToList();
+                entries = entries
+                    .Where(x =>
+                        !string.Equals(
+                            (x.Name ?? string.Empty).Trim(),
+                            ReservedS4RootName,
+                            StringComparison.OrdinalIgnoreCase)
+                        &&
+                        !excluded.Contains(x.Handle))
+                    .ToList();
             }
 
             return entries;
@@ -114,6 +127,8 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         {
             remotePath =
                 BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            DenyReservedPath(remotePath);
 
             if (remotePath == "/")
                 return null;
@@ -133,6 +148,27 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         public void Dispose()
         {
+        }
+
+        private static void DenyReservedPath(string remotePath)
+        {
+            remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            var reserved = "/" + ReservedS4RootName;
+
+            if (string.Equals(
+                    remotePath,
+                    reserved,
+                    StringComparison.OrdinalIgnoreCase)
+                ||
+                remotePath.StartsWith(
+                    reserved + "/",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException(
+                    "The MEGA S4 namespace is not available through the normal MEGA Cloud connector.");
+            }
         }
 
         private HashSet<string> LoadExcludedRootHandles()

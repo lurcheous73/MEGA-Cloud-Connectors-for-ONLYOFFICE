@@ -55,7 +55,6 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                 result.Add(new BrimstoneMegaCloudEntry
                 {
                     Handle = match.Groups["handle"].Value,
-                    ParentHandle = parentHandle ?? string.Empty,
                     Name = match.Groups["name"].Value,
                     Flags = flags,
                     VersionCount = versions,

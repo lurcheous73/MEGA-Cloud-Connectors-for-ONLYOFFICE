@@ -1,3 +1,7 @@
-# One MEGA root-node handle per line.
-# These nodes remain in MEGA but are hidden from this ONLYOFFICE provider.
+# Optional additional root-node exclusions.
+#
+# The root named "S4 Object storage" is already globally hidden AND
+# denied by the normal MEGA Cloud provider for every user/account.
+#
+# Handles listed here are additional per-session exclusions.
 N5owxICJ
