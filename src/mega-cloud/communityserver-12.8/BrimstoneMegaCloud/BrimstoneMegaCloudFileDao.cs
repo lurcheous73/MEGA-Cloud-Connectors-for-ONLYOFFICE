@@ -71,9 +71,39 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             return Order(files, orderBy).ToList();
         }
 
-        public Stream GetFileStream(File file) { throw ReadOnly(); }
-        public Stream GetFileStream(File file, long offset) { throw ReadOnly(); }
-        public Task<Stream> GetFileStreamAsync(File file) { throw ReadOnly(); }
+        public Stream GetFileStream(File file)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            return ProviderInfo.Client.OpenRead(
+                DecodeId(file.ID));
+        }
+
+        public Stream GetFileStream(File file, long offset)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            if (offset < 0)
+                throw new ArgumentOutOfRangeException("offset");
+
+            return ProviderInfo.Client.OpenRead(
+                DecodeId(file.ID),
+                offset);
+        }
+
+        public Task<Stream> GetFileStreamAsync(File file)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            return Task.Factory.StartNew<Stream>(
+                delegate
+                {
+                    return GetFileStream(file);
+                });
+        }
         public Uri GetPreSignedUri(File file, TimeSpan expires) { throw ReadOnly(); }
         public bool IsSupportedPreSignedUri(File file) { return false; }
 

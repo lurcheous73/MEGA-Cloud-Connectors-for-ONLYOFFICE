@@ -11,7 +11,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
     internal sealed class BrimstoneMegaCloudClient : IDisposable
     {
         private const int CommandTimeoutMilliseconds = 180000;
+        private const int DownloadTimeoutMilliseconds = 1800000;
+
         private const uint Mode0700 = 448;
+        private const uint Mode0600 = 384;
 
         // BRIMSTONE: this root belongs to the separate MEGA S4 provider.
         // It is globally unavailable through the normal MEGA Cloud provider.
@@ -146,8 +149,163 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                         StringComparison.Ordinal));
         }
 
+        public Stream OpenRead(string remotePath)
+        {
+            return OpenRead(remotePath, 0);
+        }
+
+        public Stream OpenRead(string remotePath, long offset)
+        {
+            remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            DenyReservedPath(remotePath);
+
+            if (remotePath == "/")
+                throw new ArgumentException(
+                    "MEGA Cloud root cannot be opened as a file.",
+                    "remotePath");
+
+            if (offset < 0)
+                throw new ArgumentOutOfRangeException("offset");
+
+            // Resolve against the live parent listing first. This verifies that
+            // the path still exists and represents a file before downloading it.
+            var entry = GetEntry(remotePath);
+
+            if (entry == null || !entry.IsFile)
+                throw new FileNotFoundException(
+                    "Brimstone MEGA Cloud file was not found.",
+                    remotePath);
+
+            var downloadRoot =
+                Path.Combine(slotRoot, "downloads");
+
+            Directory.CreateDirectory(downloadRoot);
+
+            if (chmod(downloadRoot, Mode0700) != 0)
+                throw new InvalidOperationException(
+                    "Unable to secure Brimstone MEGA Cloud download directory.");
+
+            var tempDirectory =
+                Path.Combine(
+                    downloadRoot,
+                    Guid.NewGuid().ToString("N"));
+
+            Directory.CreateDirectory(tempDirectory);
+
+            if (chmod(tempDirectory, Mode0700) != 0)
+            {
+                try { Directory.Delete(tempDirectory, true); }
+                catch { }
+
+                throw new InvalidOperationException(
+                    "Unable to secure Brimstone MEGA Cloud temporary download directory.");
+            }
+
+            try
+            {
+                RunReadOnly(
+                    "get --ignore-quota-warn "
+                    + QuoteArgument(remotePath)
+                    + " "
+                    + QuoteArgument(tempDirectory),
+                    DownloadTimeoutMilliseconds);
+
+                // A remote FILE download must create exactly one ordinary file
+                // in our unique destination directory. Do not derive a local
+                // filename from user-controlled remote path text.
+                var files =
+                    Directory.GetFiles(
+                        tempDirectory,
+                        "*",
+                        SearchOption.TopDirectoryOnly);
+
+                if (files.Length != 1)
+                    throw new InvalidOperationException(
+                        "Brimstone MEGA Cloud download produced an unexpected local result.");
+
+                var localFile = files[0];
+
+                if (chmod(localFile, Mode0600) != 0)
+                    throw new InvalidOperationException(
+                        "Unable to secure downloaded Brimstone MEGA Cloud file.");
+
+                var stream =
+                    new TemporaryDownloadFileStream(
+                        localFile,
+                        tempDirectory);
+
+                if (offset > 0)
+                    stream.Seek(offset, SeekOrigin.Begin);
+
+                return stream;
+            }
+            catch
+            {
+                try
+                {
+                    if (Directory.Exists(tempDirectory))
+                        Directory.Delete(tempDirectory, true);
+                }
+                catch
+                {
+                }
+
+                throw;
+            }
+        }
+
         public void Dispose()
         {
+        }
+
+        private sealed class TemporaryDownloadFileStream : FileStream
+        {
+            private readonly string temporaryDirectory;
+            private bool disposed;
+
+            public TemporaryDownloadFileStream(string path,
+                                               string temporaryDirectory)
+                : base(path,
+                       FileMode.Open,
+                       FileAccess.Read,
+                       FileShare.Read,
+                       65536,
+                       FileOptions.SequentialScan)
+            {
+                this.temporaryDirectory = temporaryDirectory;
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposed)
+                    return;
+
+                disposed = true;
+
+                try
+                {
+                    base.Dispose(disposing);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(temporaryDirectory)
+                            && Directory.Exists(temporaryDirectory))
+                        {
+                            Directory.Delete(temporaryDirectory, true);
+                        }
+                    }
+                    catch
+                    {
+                        // Cleanup failure must not invalidate a successfully
+                        // delivered file stream. Stale temp cleanup can be
+                        // handled separately.
+                    }
+                }
+            }
         }
 
         private static void DenyReservedPath(string remotePath)
@@ -226,6 +384,11 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         private string RunReadOnly(string arguments)
         {
+            return RunReadOnly(arguments, CommandTimeoutMilliseconds);
+        }
+
+        private string RunReadOnly(string arguments, int timeoutMilliseconds)
+        {
             if (!HasSavedSession)
                 throw new InvalidOperationException(
                     "Brimstone MEGA Cloud provider has no saved MEGA session.");
@@ -286,7 +449,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                     Task.Factory.StartNew(
                         delegate { return process.StandardError.ReadToEnd(); });
 
-                if (!process.WaitForExit(CommandTimeoutMilliseconds))
+                if (!process.WaitForExit(timeoutMilliseconds))
                 {
                     try { process.Kill(); }
                     catch { }
