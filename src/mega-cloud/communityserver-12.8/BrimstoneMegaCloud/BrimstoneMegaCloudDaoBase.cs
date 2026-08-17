@@ -213,6 +213,16 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                 : parentPath + "/" + name;
         }
 
+        protected bool NodeExists(string title,
+                                  string parentPath)
+        {
+            return ProviderInfo.Client.ListChildren(parentPath)
+                .Any(x =>
+                    x.Name.Equals(
+                        title,
+                        StringComparison.InvariantCultureIgnoreCase));
+        }
+
         protected string GetAvailableTitle(string requestedTitle,
                                            string parentPath,
                                            Func<string, string, bool> exists)

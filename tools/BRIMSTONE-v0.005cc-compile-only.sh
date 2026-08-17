@@ -26,7 +26,7 @@ CANDIDATE="$BIN/ASC.Files.Thirdparty.dll"
 fail(){ echo "BRIMSTONE FAIL: $*" >&2; exit 1; }
 
 preflight(){
-    echo "=== BRIMSTONE MEGA CLOUD v0.004cc COMPILE-ONLY PREFLIGHT ==="
+    echo "=== BRIMSTONE MEGA CLOUD v0.005cc COMPILE-ONLY PREFLIGHT ==="
     [[ -d "$ROOT/.git" ]] || fail "connector repository missing"
     [[ "$(git -C "$ROOT" branch --show-current)" == "$BRANCH" ]] || fail "expected branch $BRANCH"
     [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] || fail "connector repository is dirty"
@@ -205,7 +205,7 @@ echo 'PASS: restricted-operation fail-closed code remains present'
 CHECK
 
     echo
-    echo "=== v0.004cc SOURCE CAPABILITY CONTRACT ==="
+    echo "=== v0.005cc CREATE/EDIT BASE CONTRACT ==="
 
     # Writable operations that MUST now exist.
     grep -Fq \
@@ -248,43 +248,98 @@ CHECK
     echo "PASS: folder create enabled"
 
     echo
-    echo "=== DESTRUCTIVE OPERATIONS MUST STILL FAIL CLOSED ==="
+    echo "=== v0.005cc FULL-WRITE CAPABILITY CONTRACT ==="
 
-    grep -Fq \
-      'public void DeleteFile(object fileId) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+grep -Fq \
+    'public BrimstoneMegaCloudEntry Move(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "v0.005 client Move is missing"
 
-    grep -Fq \
-      'public object MoveFile(object fileId, object toFolderId) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+grep -Fq \
+    'public BrimstoneMegaCloudEntry Copy(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "v0.005 client Copy is missing"
 
-    grep -Fq \
-      'public File CopyFile(object fileId, object toFolderId) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+grep -Fq \
+    'public void MoveToRubbish(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "v0.005 safe-delete implementation is missing"
 
-    grep -Fq \
-      'public object FileRename(File file, string newTitle) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+grep -Fq \
+    '+ " //bin"' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "v0.005 safe delete does not target MEGA Rubbish Bin"
 
-    grep -Fq \
-      'public void DeleteFolder(object folderId) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+if grep -Fq \
+    '"rm ' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs"
+then
+    fail "permanent MEGA rm command must never be exposed"
+fi
 
-    grep -Fq \
-      'public object MoveFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+grep -Fq \
+    'public object MoveFile(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs" ||
+    fail "file move is missing"
 
-    grep -Fq \
-      'public Folder CopyFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }' \
-      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+grep -Fq \
+    'public File CopyFile(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs" ||
+    fail "file copy is missing"
 
-    echo "PASS: delete remains disabled"
-    echo "PASS: move remains disabled"
-    echo "PASS: copy remains disabled"
-    echo "PASS: rename remains disabled"
+grep -Fq \
+    'public object FileRename(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs" ||
+    fail "file rename is missing"
 
-    echo
-    echo "=== BRIMSTONE MEGA CLOUD v0.004cc COMPILE-ONLY PASS ==="
+grep -Fq \
+    'ProviderInfo.Client.MoveToRubbish(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs" ||
+    fail "file safe-delete is missing"
+
+grep -Fq \
+    'public object MoveFolder(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs" ||
+    fail "folder move is missing"
+
+grep -Fq \
+    'public Folder CopyFolder(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs" ||
+    fail "folder copy is missing"
+
+grep -Fq \
+    'public object RenameFolder(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs" ||
+    fail "folder rename is missing"
+
+grep -Fq \
+    'ProviderInfo.Client.MoveToRubbish(' \
+    "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs" ||
+    fail "folder safe-delete is missing"
+
+grep -Fq \
+    'DenyReservedPath(sourcePath);' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "source S4 guard is missing"
+
+grep -Fq \
+    'DenyReservedPath(destinationPath);' \
+    "$CLOUD_SRC/BrimstoneMegaCloudClient.cs" ||
+    fail "destination S4 guard is missing"
+
+echo "PASS: file rename enabled"
+echo "PASS: file move enabled"
+echo "PASS: file copy enabled"
+echo "PASS: file safe delete -> MEGA //bin"
+echo "PASS: folder rename enabled"
+echo "PASS: folder move enabled"
+echo "PASS: folder copy enabled"
+echo "PASS: folder safe delete -> MEGA //bin"
+echo "PASS: permanent MEGA rm absent"
+echo "PASS: source/destination S4 guards present"
+
+echo
+echo "=== BRIMSTONE MEGA CLOUD v0.005cc COMPILE-ONLY PASS ==="
     sha256sum "$CANDIDATE"
     echo "candidate:   $CANDIDATE"
     echo "live stack:  NOT MODIFIED"

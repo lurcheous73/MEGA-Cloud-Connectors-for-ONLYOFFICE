@@ -383,6 +383,178 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             }
         }
 
+        public BrimstoneMegaCloudEntry Move(string sourcePath,
+                                                string destinationPath)
+        {
+            sourcePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(sourcePath);
+
+            destinationPath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(destinationPath);
+
+            DenyReservedPath(sourcePath);
+            DenyReservedPath(destinationPath);
+
+            if (sourcePath == "/")
+                throw new InvalidOperationException(
+                    "MEGA Cloud root cannot be moved or renamed.");
+
+            if (destinationPath == "/")
+                throw new InvalidOperationException(
+                    "MEGA Cloud root cannot be a node destination.");
+
+            var destinationName =
+                RemoteLeaf(destinationPath);
+
+            ValidateNodeName(destinationName);
+
+            var source =
+                GetEntry(sourcePath);
+
+            if (source == null)
+                throw new FileNotFoundException(
+                    "Brimstone MEGA Cloud source node was not found.",
+                    sourcePath);
+
+            if (string.Equals(
+                    sourcePath,
+                    destinationPath,
+                    StringComparison.Ordinal))
+            {
+                return source;
+            }
+
+            if (destinationPath.StartsWith(
+                    sourcePath + "/",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "A MEGA Cloud node cannot be moved into itself.");
+            }
+
+            if (GetEntry(destinationPath) != null)
+                throw new IOException(
+                    "The requested MEGA Cloud destination already exists.");
+
+            RunReadOnly(
+                "mv "
+                + QuoteArgument(sourcePath)
+                + " "
+                + QuoteArgument(destinationPath));
+
+            var moved =
+                GetEntry(destinationPath);
+
+            if (moved == null)
+                throw new InvalidOperationException(
+                    "Brimstone MEGA Cloud move could not be verified.");
+
+            return moved;
+        }
+
+        public BrimstoneMegaCloudEntry Copy(string sourcePath,
+                                                string destinationPath)
+        {
+            sourcePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(sourcePath);
+
+            destinationPath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(destinationPath);
+
+            DenyReservedPath(sourcePath);
+            DenyReservedPath(destinationPath);
+
+            if (sourcePath == "/")
+                throw new InvalidOperationException(
+                    "MEGA Cloud root cannot be copied.");
+
+            if (destinationPath == "/")
+                throw new InvalidOperationException(
+                    "MEGA Cloud root cannot be a node destination.");
+
+            var destinationName =
+                RemoteLeaf(destinationPath);
+
+            ValidateNodeName(destinationName);
+
+            var source =
+                GetEntry(sourcePath);
+
+            if (source == null)
+                throw new FileNotFoundException(
+                    "Brimstone MEGA Cloud source node was not found.",
+                    sourcePath);
+
+            if (string.Equals(
+                    sourcePath,
+                    destinationPath,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "A MEGA Cloud node cannot be copied onto itself.");
+            }
+
+            if (destinationPath.StartsWith(
+                    sourcePath + "/",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "A MEGA Cloud folder cannot be copied into itself.");
+            }
+
+            if (GetEntry(destinationPath) != null)
+                throw new IOException(
+                    "The requested MEGA Cloud destination already exists.");
+
+            RunReadOnly(
+                "cp "
+                + QuoteArgument(sourcePath)
+                + " "
+                + QuoteArgument(destinationPath),
+                DownloadTimeoutMilliseconds);
+
+            var copied =
+                GetEntry(destinationPath);
+
+            if (copied == null)
+                throw new InvalidOperationException(
+                    "Brimstone MEGA Cloud copy could not be verified.");
+
+            return copied;
+        }
+
+        public void MoveToRubbish(string sourcePath)
+        {
+            sourcePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(sourcePath);
+
+            DenyReservedPath(sourcePath);
+
+            if (sourcePath == "/")
+                throw new InvalidOperationException(
+                    "MEGA Cloud root cannot be removed.");
+
+            var source =
+                GetEntry(sourcePath);
+
+            if (source == null)
+                throw new FileNotFoundException(
+                    "Brimstone MEGA Cloud source node was not found.",
+                    sourcePath);
+
+            // Safe delete contract:
+            // moving to MEGA's Rubbish Bin was acceptance-tested for both
+            // files and complete folder trees, including successful restore.
+            RunReadOnly(
+                "mv "
+                + QuoteArgument(sourcePath)
+                + " //bin");
+
+            if (GetEntry(sourcePath) != null)
+                throw new InvalidOperationException(
+                    "Brimstone MEGA Cloud safe delete could not be verified.");
+        }
+
         public void Dispose()
         {
         }

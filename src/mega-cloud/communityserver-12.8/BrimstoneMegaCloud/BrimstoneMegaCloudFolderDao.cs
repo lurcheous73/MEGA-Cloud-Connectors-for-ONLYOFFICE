@@ -145,30 +145,150 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                     parentPath,
                     folder.Title));
         }
-        public void DeleteFolder(object folderId) { throw ReadOnly(); }
-        public object MoveFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }
-        public Folder CopyFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }
+        public void DeleteFolder(object folderId)
+        {
+            ProviderInfo.Client.MoveToRubbish(
+                DecodeId(folderId));
+        }
+
+        public object MoveFolder(object folderId,
+                                 object toFolderId,
+                                 CancellationToken? cancellationToken)
+        {
+            if (cancellationToken.HasValue)
+                cancellationToken.Value.ThrowIfCancellationRequested();
+
+            var sourcePath =
+                DecodeId(folderId);
+
+            var destinationParent =
+                DecodeId(toFolderId);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    RemoteLeaf(sourcePath),
+                    destinationParent,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    destinationParent,
+                    destinationTitle);
+
+            return MakeId(
+                ProviderInfo.Client.Move(
+                    sourcePath,
+                    destinationPath));
+        }
+
+        public Folder CopyFolder(object folderId,
+                                 object toFolderId,
+                                 CancellationToken? cancellationToken)
+        {
+            if (cancellationToken.HasValue)
+                cancellationToken.Value.ThrowIfCancellationRequested();
+
+            var sourcePath =
+                DecodeId(folderId);
+
+            var destinationParent =
+                DecodeId(toFolderId);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    RemoteLeaf(sourcePath),
+                    destinationParent,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    destinationParent,
+                    destinationTitle);
+
+            return ToFolder(
+                ProviderInfo.Client.Copy(
+                    sourcePath,
+                    destinationPath));
+        }
 
         public IDictionary<object, string> CanMoveOrCopy(object[] folderIds, object to)
         {
-            var result = new Dictionary<object, string>();
-            if (folderIds == null) return result;
-            foreach (var id in folderIds) result[id] = "Brimstone MEGA Cloud v0.002cc is read-only.";
+            var result =
+                new Dictionary<object, string>();
+
+            if (folderIds == null)
+                return result;
+
+            foreach (var id in folderIds)
+            {
+                try
+                {
+                    var remotePath =
+                        BrimstoneMegaCloudId.NormalizeRemotePath(
+                            DecodeId(id));
+
+                    if (remotePath == "/")
+                    {
+                        result[id] =
+                            "The MEGA Cloud provider root cannot be moved or copied.";
+                    }
+                }
+                catch (Exception error)
+                {
+                    result[id] = error.Message;
+                }
+            }
+
             return result;
         }
 
         public object RenameFolder(Folder folder, string newTitle)
         {
-            if (folder == null) throw new ArgumentNullException("folder");
+            if (folder == null)
+                throw new ArgumentNullException("folder");
+
             var remotePath =
-                BrimstoneMegaCloudId.NormalizeRemotePath(DecodeId(folder.ID));
+                BrimstoneMegaCloudId.NormalizeRemotePath(
+                    DecodeId(folder.ID));
 
             if (remotePath == "/")
             {
-                Selector.RenameProvider(ProviderInfo, newTitle);
+                Selector.RenameProvider(
+                    ProviderInfo,
+                    newTitle);
+
                 return MakeId(string.Empty);
             }
-            throw ReadOnly();
+
+            var currentTitle =
+                RemoteLeaf(remotePath);
+
+            if (string.Equals(
+                    currentTitle,
+                    newTitle,
+                    StringComparison.Ordinal))
+            {
+                return MakeId(remotePath);
+            }
+
+            var parentPath =
+                ParentRemotePath(remotePath);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    newTitle,
+                    parentPath,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    parentPath,
+                    destinationTitle);
+
+            return MakeId(
+                ProviderInfo.Client.Move(
+                    remotePath,
+                    destinationPath));
         }
 
         public int GetItemsCount(object folderId) { return GetCloudItems(folderId).Count; }

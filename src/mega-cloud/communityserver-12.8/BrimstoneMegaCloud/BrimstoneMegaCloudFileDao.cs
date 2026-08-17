@@ -167,8 +167,16 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         {
             return SaveFile(file, fileStream);
         }
-        public void DeleteFile(object fileId, Guid ownerId) { throw ReadOnly(); }
-        public void DeleteFile(object fileId) { throw ReadOnly(); }
+        public void DeleteFile(object fileId, Guid ownerId)
+        {
+            DeleteFile(fileId);
+        }
+
+        public void DeleteFile(object fileId)
+        {
+            ProviderInfo.Client.MoveToRubbish(
+                DecodeId(fileId));
+        }
 
         public bool IsExist(string title, object folderId)
         {
@@ -177,9 +185,94 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                 .Any(x => x.IsFile && x.Name.Equals(title, StringComparison.InvariantCultureIgnoreCase));
         }
 
-        public object MoveFile(object fileId, object toFolderId) { throw ReadOnly(); }
-        public File CopyFile(object fileId, object toFolderId) { throw ReadOnly(); }
-        public object FileRename(File file, string newTitle) { throw ReadOnly(); }
+        public object MoveFile(object fileId, object toFolderId)
+        {
+            var sourcePath =
+                DecodeId(fileId);
+
+            var destinationParent =
+                DecodeId(toFolderId);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    RemoteLeaf(sourcePath),
+                    destinationParent,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    destinationParent,
+                    destinationTitle);
+
+            return MakeId(
+                ProviderInfo.Client.Move(
+                    sourcePath,
+                    destinationPath));
+        }
+
+        public File CopyFile(object fileId, object toFolderId)
+        {
+            var sourcePath =
+                DecodeId(fileId);
+
+            var destinationParent =
+                DecodeId(toFolderId);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    RemoteLeaf(sourcePath),
+                    destinationParent,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    destinationParent,
+                    destinationTitle);
+
+            return ToFile(
+                ProviderInfo.Client.Copy(
+                    sourcePath,
+                    destinationPath));
+        }
+
+        public object FileRename(File file, string newTitle)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            var sourcePath =
+                DecodeId(file.ID);
+
+            var sourceTitle =
+                RemoteLeaf(sourcePath);
+
+            if (string.Equals(
+                    sourceTitle,
+                    newTitle,
+                    StringComparison.Ordinal))
+            {
+                return MakeId(sourcePath);
+            }
+
+            var parentPath =
+                ParentRemotePath(sourcePath);
+
+            var destinationTitle =
+                GetAvailableTitle(
+                    newTitle,
+                    parentPath,
+                    NodeExists);
+
+            var destinationPath =
+                CombineRemotePath(
+                    parentPath,
+                    destinationTitle);
+
+            return MakeId(
+                ProviderInfo.Client.Move(
+                    sourcePath,
+                    destinationPath));
+        }
 
         public string UpdateComment(object fileId, int fileVersion, string comment) { return string.Empty; }
         public void CompleteVersion(object fileId, int fileVersion) { }
