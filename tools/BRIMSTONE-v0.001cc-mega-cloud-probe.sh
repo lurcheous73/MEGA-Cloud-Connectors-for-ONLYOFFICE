@@ -21,6 +21,8 @@ EXPECTED_BRANCH="v0.001cc-mega-cloud"
 [[ -f "$MANIFEST" ]] || { echo "Missing $MANIFEST" >&2; exit 2; }
 # shellcheck source=/dev/null
 source "$MANIFEST"
+export BRIMSTONE_MEGA_SDK_VERSION BRIMSTONE_MEGA_SDK_COMMIT BRIMSTONE_VCPKG_BASELINE
+export BRIMSTONE_CMAKE_VERSION BRIMSTONE_MEGA_USER_AGENT
 
 fail() { echo "BRIMSTONE FAIL: $*" >&2; exit 1; }
 info() { echo "BRIMSTONE: $*"; }
@@ -29,8 +31,10 @@ require_host() {
     command -v git >/dev/null 2>&1 || fail "git is required on the host"
     command -v docker >/dev/null 2>&1 || fail "docker is required on the host"
 
-    [[ "$(git -C "$ROOT" branch --show-current)" == "$EXPECTED_BRANCH" ]] ||
-        fail "expected branch $EXPECTED_BRANCH, found $(git -C "$ROOT" branch --show-current)"
+    local branch
+    branch="$(git -C "$ROOT" branch --show-current)"
+    [[ "$branch" == "$EXPECTED_BRANCH" ]] ||
+        fail "expected branch $EXPECTED_BRANCH, found $branch"
 
     [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] ||
         fail "repository is dirty; commit/stash changes before the exact v0.001cc build"
@@ -49,7 +53,15 @@ preflight() {
     echo "MEGA SDK tag:  v$BRIMSTONE_MEGA_SDK_VERSION"
     echo "MEGA SDK SHA:  $BRIMSTONE_MEGA_SDK_COMMIT"
     echo "vcpkg SHA:     $BRIMSTONE_VCPKG_BASELINE"
+    echo "CMake:         $BRIMSTONE_CMAKE_VERSION"
     echo "live stack:    NOT TOUCHED"
+    echo
+    echo "=== DISPOSABLE BUILDER RUNTIME ==="
+    docker run --rm --entrypoint /bin/sh "$BUILDER_IMAGE" -c '
+        . /etc/os-release 2>/dev/null || true
+        echo "os=${ID:-unknown} ${VERSION_ID:-unknown}"
+        echo "arch=$(uname -m)"
+    '
 }
 
 build_probe() {
@@ -64,13 +76,22 @@ build_probe() {
         -e BRIMSTONE_MEGA_SDK_VERSION \
         -e BRIMSTONE_MEGA_SDK_COMMIT \
         -e BRIMSTONE_VCPKG_BASELINE \
+        -e BRIMSTONE_CMAKE_VERSION \
         "$BUILDER_IMAGE" -lc '
 set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-    build-essential ca-certificates cmake curl git ninja-build pkg-config python3 \
+    build-essential ca-certificates curl git ninja-build pkg-config python3 python3-pip \
     zip unzip autoconf autoconf-archive automake nasm libtool libtool-bin
+
+python3 -m pip install --no-cache-dir "cmake==$BRIMSTONE_CMAKE_VERSION"
+hash -r
+ACTUAL_CMAKE=$(cmake --version | head -n1 | awk "{print \$3}")
+[[ "$ACTUAL_CMAKE" == "$BRIMSTONE_CMAKE_VERSION" ]] || {
+    echo "BRIMSTONE FAIL: CMake $ACTUAL_CMAKE loaded, expected $BRIMSTONE_CMAKE_VERSION" >&2
+    exit 1
+}
 
 BUILD_ROOT=/work/build/mega-cloud-v0.001cc
 SDK_SRC=$BUILD_ROOT/mega-sdk
@@ -164,7 +185,7 @@ status() {
 
 ensure_probe() {
     require_host
-    [[ -x "$PROBE_BIN" ]] || fail "probe is not built; run: $0 build"
+    [[ -x "$PROBE_BIN" ]] || fail "probe is not built; run: bash $0 build"
     mkdir -p "$STATE_DIR/cache"
     chmod 700 "$STATE_DIR" "$STATE_DIR/cache"
 }
@@ -200,7 +221,6 @@ auth_root() {
     export BRIMSTONE_MEGA_EMAIL="$email"
     export BRIMSTONE_MEGA_PASSWORD="$password"
     export BRIMSTONE_MEGA_MFA=""
-    export BRIMSTONE_MEGA_USER_AGENT
 
     if output=$(run_probe_container auth-root); then
         rc=0
@@ -235,7 +255,6 @@ resume_root() {
     export BRIMSTONE_MEGA_EMAIL=""
     export BRIMSTONE_MEGA_PASSWORD=""
     export BRIMSTONE_MEGA_MFA=""
-    export BRIMSTONE_MEGA_USER_AGENT
 
     if output=$(run_probe_container resume-root); then
         rc=0
@@ -243,7 +262,7 @@ resume_root() {
         rc=$?
     fi
     echo "$output"
-    unset BRIMSTONE_MEGA_APP_KEY
+    unset BRIMSTONE_MEGA_APP_KEY BRIMSTONE_MEGA_EMAIL BRIMSTONE_MEGA_PASSWORD BRIMSTONE_MEGA_MFA
     unset appkey
     return "$rc"
 }
