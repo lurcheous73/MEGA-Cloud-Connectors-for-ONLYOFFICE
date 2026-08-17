@@ -70,8 +70,18 @@ stage_reference_bin(){
     mkdir -p "$BIN"
     echo "=== STAGE LIVE BINARIES AS READ-ONLY BUILD REFERENCES ==="
     docker cp "$LIVE_CONTAINER:/var/www/onlyoffice/WebStudio/bin/." "$BIN/" >/dev/null
-    [[ -s "$BIN/ASC.Files.Core.dll" ]] || fail "staged ASC.Files.Core.dll missing"
+
+    # BRIMSTONE: do not invent assembly filenames from namespaces. The pinned
+    # CommunityServer project uses ProjectReference outputs from this WebStudio
+    # bin directory; the accepted S4 build follows the same pattern. Validate
+    # the known target assembly plus a sane staged DLL count and let MSBuild
+    # report any genuinely missing reference by its real assembly name.
     [[ -s "$BIN/ASC.Files.Thirdparty.dll" ]] || fail "staged ASC.Files.Thirdparty.dll missing"
+    local dll_count
+    dll_count="$(find "$BIN" -maxdepth 1 -type f -name '*.dll' | wc -l | tr -d ' ')"
+    [[ "$dll_count" =~ ^[0-9]+$ ]] || fail "could not count staged WebStudio assemblies"
+    (( dll_count > 10 )) || fail "too few staged WebStudio assemblies: $dll_count"
+    echo "PASS: staged $dll_count live WebStudio DLLs as isolated build references"
 }
 
 create_temp_project(){
