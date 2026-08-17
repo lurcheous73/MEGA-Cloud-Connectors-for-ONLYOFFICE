@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# ============================================================
+# Brimstone MEGA Cloud runtime wrapper
+#
+# Responsibilities:
+#   - wait for CommunityServer systemd tmpfiles boot phase
+#   - protect MEGAcmd runtime recovery with persistent flock
+#   - preserve existing official MEGAcmd saved session
+#   - recover orphaned/stale dedicated mega-cmd-server
+#   - execute requested mega-exec command EXACTLY ONCE
+#
+# It does NOT:
+#   - login/logout
+#   - know MEGA passwords
+#   - cache/mirror MEGA content
+#   - implement permanent delete
+# ============================================================
+
+MEGA_ROOT="${BRIMSTONE_MEGACMD_ROOT:-/opt/brimstone/mega-cloud/megacmd}"
+
+MEGA_EXEC="${BRIMSTONE_MEGA_EXEC:-$MEGA_ROOT/usr/bin/mega-exec}"
+MEGA_SERVER="${BRIMSTONE_MEGA_SERVER:-$MEGA_ROOT/usr/bin/mega-cmd-server}"
+
+: "${HOME:?HOME must identify the MEGA provider state slot}"
+: "${MEGACMD_SOCKET_NAME:?MEGACMD_SOCKET_NAME must be set}"
+
+UID_NOW="$(id -u)"
+GID_NOW="$(id -g)"
+
+SOCKET_DIR="/tmp/megacmd-${UID_NOW}"
+SOCKET_PATH="${SOCKET_DIR}/${MEGACMD_SOCKET_NAME}"
+
+STATE_ROOT="$HOME"
+LOCK_FILE="${STATE_ROOT}/.brimstone-megacc-runtime.lock"
+
+WAIT_SECONDS="${BRIMSTONE_TMPFILES_WAIT_SECONDS:-120}"
+
+log()
+{
+    printf 'BRIMSTONE-MEGACC: %s\n' "$*" >&2
+}
+
+die()
+{
+    log "FAIL: $*"
+    exit 70
+}
+
+[[ -x "$MEGA_EXEC" ]] ||
+    die "mega-exec missing: $MEGA_EXEC"
+
+[[ -x "$MEGA_SERVER" ]] ||
+    die "mega-cmd-server missing: $MEGA_SERVER"
+
+[[ -d "$STATE_ROOT" ]] ||
+    die "provider HOME missing: $STATE_ROOT"
+
+wait_for_tmpfiles()
+{
+    # CommunityServer boots systemd internally.
+    # Do not allow MEGAcmd to establish its /tmp socket before
+    # systemd-tmpfiles-setup has completed its boot-time removal.
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local n state substate
+
+    for n in $(seq 1 "$WAIT_SECONDS"); do
+        state="$(
+            systemctl is-active \
+                systemd-tmpfiles-setup.service \
+                2>/dev/null || true
+        )"
+
+        substate="$(
+            systemctl show \
+                systemd-tmpfiles-setup.service \
+                -p SubState \
+                --value \
+                2>/dev/null || true
+        )"
+
+        if [[ "$state" == "active" &&
+              "$substate" == "exited" ]]
+        then
+            return 0
+        fi
+
+        sleep 1
+    done
+
+    die "systemd-tmpfiles-setup did not complete within ${WAIT_SECONDS}s"
+}
+
+server_pids()
+{
+    pgrep \
+        -u "$UID_NOW" \
+        -f "^${MEGA_SERVER} --do-not-log-to-stdout$" \
+        2>/dev/null || true
+}
+
+runtime_probe()
+{
+    local output rc
+
+    set +e
+    output="$("$MEGA_EXEC" whoami 2>&1)"
+    rc=$?
+    set -e
+
+    if (( rc != 0 )); then
+        return 1
+    fi
+
+    grep -q '^Account e-mail:' <<<"$output"
+}
+
+stop_dedicated_server()
+{
+    local pids pid
+
+    pids="$(server_pids)"
+
+    [[ -n "$pids" ]] || return 0
+
+    log "stopping stale dedicated MEGAcmd server: $(tr '\n' ' ' <<<"$pids")"
+
+    for pid in $pids; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+
+    for _ in $(seq 1 50); do
+        [[ -z "$(server_pids)" ]] && return 0
+        sleep 0.1
+    done
+
+    pids="$(server_pids)"
+
+    if [[ -n "$pids" ]]; then
+        log "TERM timeout; killing stale dedicated server"
+
+        for pid in $pids; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
+    fi
+
+    for _ in $(seq 1 20); do
+        [[ -z "$(server_pids)" ]] && return 0
+        sleep 0.1
+    done
+
+    die "dedicated MEGAcmd server would not stop"
+}
+
+prepare_socket_directory()
+{
+    if [[ -e "$SOCKET_DIR" && ! -d "$SOCKET_DIR" ]]; then
+        die "$SOCKET_DIR exists but is not a directory"
+    fi
+
+    mkdir -p "$SOCKET_DIR"
+    chmod 0700 "$SOCKET_DIR"
+
+    local owner
+    owner="$(stat -c '%u:%g' "$SOCKET_DIR")"
+
+    [[ "$owner" == "${UID_NOW}:${GID_NOW}" ]] ||
+        die "unsafe socket directory owner: $owner"
+
+    if [[ -e "$SOCKET_PATH" && ! -S "$SOCKET_PATH" ]]; then
+        die "expected socket path exists but is not a socket"
+    fi
+}
+
+recover_runtime_locked()
+{
+    # Another worker may already have repaired it while we waited.
+    if runtime_probe; then
+        return 0
+    fi
+
+    log "runtime unhealthy; beginning bounded recovery"
+
+    stop_dedicated_server
+
+    rm -f -- "$SOCKET_PATH"
+
+    prepare_socket_directory
+
+    # Official mega-exec starts the official server and resumes the
+    # saved session in HOME. No login/reconnect operation is performed.
+    if ! runtime_probe; then
+        die "saved-session MEGAcmd recovery failed"
+    fi
+
+    [[ -S "$SOCKET_PATH" ]] ||
+        die "MEGAcmd recovered but expected socket is absent"
+
+    log "runtime recovered successfully"
+}
+
+ensure_runtime()
+{
+    wait_for_tmpfiles
+
+    # Healthy path: one harmless RPC before the actual requested
+    # operation. The requested operation itself is never retried.
+    if runtime_probe; then
+        return 0
+    fi
+
+    # Persistent lock lives with provider state, never in /tmp.
+    exec 9>"$LOCK_FILE"
+
+    flock -w 30 9 ||
+        die "timed out waiting for runtime recovery lock"
+
+    recover_runtime_locked
+}
+
+ensure_runtime
+
+# CRITICAL:
+# Execute the caller's requested MEGA operation exactly once.
+exec "$MEGA_EXEC" "$@"
