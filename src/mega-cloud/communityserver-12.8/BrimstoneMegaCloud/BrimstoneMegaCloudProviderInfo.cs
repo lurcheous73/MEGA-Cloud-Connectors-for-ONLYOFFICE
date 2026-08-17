@@ -67,6 +67,18 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             }
         }
 
+        public void InvalidateStorage()
+        {
+            // BRIMSTONE CUSTOM CODE: mirror the IProviderInfo lifecycle used by
+            // ONLYOFFICE's third-party providers. Drop only the per-provider
+            // client object; protected MEGAcmd session state remains untouched.
+            if (client != null)
+            {
+                client.Dispose();
+                client = null;
+            }
+        }
+
         internal void UpdateTitle(string title)
         {
             CustomerTitle = title;
@@ -74,11 +86,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 
         public void Dispose()
         {
-            if (client != null)
-            {
-                client.Dispose();
-                client = null;
-            }
+            InvalidateStorage();
         }
     }
 }
