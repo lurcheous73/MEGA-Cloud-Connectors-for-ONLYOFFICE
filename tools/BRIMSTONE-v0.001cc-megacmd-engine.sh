@@ -156,7 +156,7 @@ cmake -G Ninja -S "$MEGACMD_SRC" -B "$MEGACMD_BUILD" \
     -DUSE_FFMPEG=OFF \
     -DUSE_LIBUV=OFF \
     -DUSE_PDFIUM=OFF \
-    -DUSE_READLINE=OFF
+    -DUSE_READLINE=ON
 
 cmake --build "$MEGACMD_BUILD" -j"$(nproc)"
 cmake --install "$MEGACMD_BUILD"
