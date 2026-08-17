@@ -131,6 +131,11 @@ fetch_exact https://github.com/microsoft/vcpkg.git "$VCPKG_SRC" "$BRIMSTONE_VCPK
 
 rm -rf "$MEGACMD_PREFIX"
 
+# BRIMSTONE: official MEGAcmd itself compiles against the SDK sync API,
+# including MegaSync/MegaSyncStall and sync-aware logout interfaces. Keep that
+# API compiled so the pinned upstream MEGAcmd/SDK pair remains compatible.
+# Brimstone does not create, configure or run MEGA sync jobs; Connected Cloud
+# operations remain direct remote operations through the official MEGA engine.
 cmake -G Ninja -S "$MEGACMD_SRC" -B "$MEGACMD_BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$MEGACMD_PREFIX" \
@@ -138,7 +143,7 @@ cmake -G Ninja -S "$MEGACMD_SRC" -B "$MEGACMD_BUILD" \
     -DFULL_REQS=OFF \
     -DUSE_PCRE=OFF \
     -DWITH_FUSE=OFF \
-    -DENABLE_SYNC=OFF \
+    -DENABLE_SYNC=ON \
     -DENABLE_MEGACMD_TESTS=OFF \
     -DENABLE_SDKLIB_TESTS=OFF \
     -DENABLE_SDKLIB_EXAMPLES=OFF \
