@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # BRIMSTONE CUSTOM CODE — v0.002cc disposable runtime smoke test.
-# Proves ProviderInfo -> read-only DAO -> pinned MEGAcmd using a COPY of an
-# already-authenticated provider slot. It never installs the candidate DLL,
-# writes the ONLYOFFICE database, or mutates the original MEGA session state.
+# Proves ProviderInfo -> DAO transport/identity layer -> pinned MEGAcmd using a
+# COPY of an already-authenticated provider slot. It deliberately stops before
+# ONLYOFFICE Folder/File projection because TenantUtil.DateTimeFromUtc requires
+# a fully bootstrapped CoreContext/TenantManager, which this standalone harness
+# does not have. Production code remains unchanged and continues to use tenant
+# timezone conversion inside the real WebStudio process.
+#
+# This script never installs the candidate DLL, writes the ONLYOFFICE database,
+# or mutates the original MEGA session state.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +24,10 @@ SOURCE_STATE_ROOT="$ROOT/build/mega-cloud-v0.001cc/megacmd-state"
 SMOKE_ROOT="$ROOT/build/brimstone-v0.002cc-runtime-smoke"
 SMOKE_STATE_ROOT="$SMOKE_ROOT/state"
 HARNESS="$SMOKE_ROOT/BrimstoneMegaCloudRuntimeSmoke.cs"
-HARNESS_EXE="$SMOKE_ROOT/BrimstoneMegaCloudRuntimeSmoke.exe"
+
+BRIMSTONE_LIVE_BEFORE=""
+BRIMSTONE_SESSION_BEFORE=""
+BRIMSTONE_SOURCE_SESSION=""
 
 fail(){ echo "BRIMSTONE FAIL: $*" >&2; exit 1; }
 
@@ -32,6 +41,43 @@ live_hash(){
     docker exec "$LIVE_CONTAINER" sha256sum "$LIVE_DLL" | awk '{print $1}'
 }
 
+verify_immutability_on_exit(){
+    local rc=$?
+    trap - EXIT
+    set +e
+
+    if [[ -n "$BRIMSTONE_LIVE_BEFORE" && -n "$BRIMSTONE_SESSION_BEFORE" && -n "$BRIMSTONE_SOURCE_SESSION" ]]; then
+        local live_after session_after
+        live_after="$(live_hash 2>/dev/null)"
+        session_after="$(sha256sum "$BRIMSTONE_SOURCE_SESSION" 2>/dev/null | awk '{print $1}')"
+
+        echo
+        echo "=== BRIMSTONE IMMUTABILITY POSTCHECK ==="
+        echo "live DLL before:     $BRIMSTONE_LIVE_BEFORE"
+        echo "live DLL after:      $live_after"
+        echo "source session hash: $session_after"
+
+        if [[ "$live_after" != "$BRIMSTONE_LIVE_BEFORE" ]]; then
+            echo "BRIMSTONE FAIL: live ASC.Files.Thirdparty.dll changed during disposable smoke" >&2
+            rc=1
+        else
+            echo "PASS: live ASC.Files.Thirdparty.dll NOT MODIFIED"
+        fi
+
+        if [[ "$session_after" != "$BRIMSTONE_SESSION_BEFORE" ]]; then
+            echo "BRIMSTONE FAIL: original saved MEGA session changed during disposable smoke" >&2
+            rc=1
+        else
+            echo "PASS: original saved MEGA session NOT MODIFIED"
+        fi
+
+        echo "database:            NOT TOUCHED"
+    fi
+
+    exit "$rc"
+}
+trap verify_immutability_on_exit EXIT
+
 main(){
     local slot
     slot="$(validate_slot "${1:-test1}")"
@@ -42,21 +88,21 @@ main(){
     [[ -d "$ROOT/.git" ]] || fail "connector repository missing"
     [[ "$(git -C "$ROOT" branch --show-current)" == "$BRANCH" ]] || fail "expected branch $BRANCH"
     [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] || fail "connector repository is dirty"
-    [[ -x "$COMPILE_GATE" || -s "$COMPILE_GATE" ]] || fail "compile-only gate missing"
+    [[ -s "$COMPILE_GATE" ]] || fail "compile-only gate missing"
     [[ -x "$ENGINE/usr/bin/mega-exec" ]] || fail "pinned MEGAcmd engine missing"
     [[ -s "$source_session" ]] || fail "saved source session missing for slot $slot"
     docker image inspect "$IMAGE" >/dev/null 2>&1 || fail "required image not local: $IMAGE"
     docker inspect "$LIVE_CONTAINER" >/dev/null 2>&1 || fail "CommunityServer container missing"
 
-    local live_before session_before
-    live_before="$(live_hash)"
-    session_before="$(sha256sum "$source_session" | awk '{print $1}')"
+    BRIMSTONE_SOURCE_SESSION="$source_session"
+    BRIMSTONE_LIVE_BEFORE="$(live_hash)"
+    BRIMSTONE_SESSION_BEFORE="$(sha256sum "$source_session" | awk '{print $1}')"
 
     echo "branch:             $(git -C "$ROOT" branch --show-current)"
     echo "head:               $(git -C "$ROOT" rev-parse HEAD)"
     echo "source slot:        $slot"
     echo "source session:     READ ONLY / COPIED"
-    echo "live DLL before:    $live_before"
+    echo "live DLL before:    $BRIMSTONE_LIVE_BEFORE"
     echo "live stack:         NOT MODIFIED"
     echo
 
@@ -80,7 +126,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 
 internal static class BrimstoneMegaCloudRuntimeSmoke
@@ -100,6 +145,11 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
         return p.GetValue(value, null);
     }
 
+    private static bool BoolProperty(object value, string name)
+    {
+        return Convert.ToBoolean(Property(value, name), CultureInfo.InvariantCulture);
+    }
+
     private static void SetProperty(object value, string name, object propertyValue)
     {
         var p = value.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -114,15 +164,18 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
         return result;
     }
 
-    private static MethodInfo OneObjectArgumentMethod(Type type, string name)
+    private static MethodInfo FindInstanceMethod(Type type, string name, Type parameterType)
     {
-        foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        for (var current = type; current != null; current = current.BaseType)
         {
-            if (method.Name != name) continue;
-            var p = method.GetParameters();
-            if (p.Length == 1 && p[0].ParameterType == typeof(object)) return method;
+            foreach (var method in current.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (method.Name != name) continue;
+                var p = method.GetParameters();
+                if (p.Length == 1 && p[0].ParameterType == parameterType) return method;
+            }
         }
-        throw new MissingMethodException(type.FullName, name + "(object)");
+        throw new MissingMethodException(type.FullName, name + "(" + parameterType.FullName + ")");
     }
 
     private static Type FindTypeInDirectory(string directory, string fullName)
@@ -137,8 +190,8 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
             }
             catch
             {
-                // Some optional WebStudio assemblies have load-time dependencies
-                // irrelevant to this smoke test. Keep looking for the exact type.
+                // Optional WebStudio assemblies may have irrelevant load-time
+                // dependencies. Keep looking for the exact required type.
             }
         }
         return null;
@@ -176,7 +229,6 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
                     folderType,
                     DateTime.UtcNow
                 });
-
             Console.WriteLine("PASS: BrimstoneMegaCloudProviderInfo instantiated");
 
             var checkAccess = providerType.GetMethod("CheckAccess", BindingFlags.Instance | BindingFlags.Public);
@@ -206,61 +258,96 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
                 null,
                 new object[] { info, selector },
                 CultureInfo.InvariantCulture);
+            Console.WriteLine("PASS: read-only folder and file DAOs instantiated");
 
-            var getFolders = OneObjectArgumentMethod(folderDaoType, "GetFolders");
-            var getFiles = OneObjectArgumentMethod(fileDaoType, "GetFiles");
+            var getCloudItems = FindInstanceMethod(folderDaoType, "GetCloudItems", typeof(object));
+            var makeId = FindInstanceMethod(folderDaoType, "MakeId", typeof(string));
+            var convertId = FindInstanceMethod(selectorType, "ConvertId", typeof(object));
 
-            Console.WriteLine("=== BRIMSTONE ROOT DAO BROWSE ===");
-            var rootFolders = Objects(getFolders.Invoke(folderDao, new object[] { rootId }));
-            Require(rootFolders.Count > 0, "root DAO browse returned no folders");
-            foreach (var folder in rootFolders)
+            Console.WriteLine("=== BRIMSTONE ROOT DAO TRANSPORT BROWSE ===");
+            var rootEntries = Objects(getCloudItems.Invoke(folderDao, new object[] { rootId }));
+            Require(rootEntries.Count > 0, "root DAO transport returned no entries");
+
+            object selectedFolder = null;
+            string selectedHandle = null;
+            string selectedExternalId = null;
+
+            foreach (var entry in rootEntries)
             {
-                var title = Convert.ToString(Property(folder, "Title"), CultureInfo.InvariantCulture);
-                var id = Convert.ToString(Property(folder, "ID"), CultureInfo.InvariantCulture);
-                var providerId = Convert.ToInt32(Property(folder, "ProviderId"), CultureInfo.InvariantCulture);
-                Require(id.StartsWith(ExpectedPrefix + "-", StringComparison.Ordinal), "folder ID is outside Brimstone handle namespace");
-                Require(providerId == ProviderId, "folder ProviderId mismatch");
-                Console.WriteLine("FOLDER: " + title + " | " + id);
-            }
-            Console.WriteLine("PASS: root DAO returned " + rootFolders.Count + " handle-native folder(s)");
+                var handle = Convert.ToString(Property(entry, "Handle"), CultureInfo.InvariantCulture);
+                var parent = Convert.ToString(Property(entry, "ParentHandle"), CultureInfo.InvariantCulture);
+                var name = Convert.ToString(Property(entry, "Name"), CultureInfo.InvariantCulture);
+                var isFolder = BoolProperty(entry, "IsFolder");
+                var isFile = BoolProperty(entry, "IsFile");
+                Require(!string.IsNullOrEmpty(handle), "root entry has empty MEGA handle");
+                Require(string.IsNullOrEmpty(parent), "root entry has unexpected parent handle");
+                Require(isFolder || isFile, "root entry has unsupported MEGA type");
 
-            object selected = null;
-            List<object> selectedFolders = null;
-            List<object> selectedFiles = null;
+                var externalId = Convert.ToString(makeId.Invoke(folderDao, new object[] { handle }), CultureInfo.InvariantCulture);
+                Require(externalId.StartsWith(ExpectedPrefix + "-", StringComparison.Ordinal), "root entry ID is outside Brimstone handle namespace");
+                Require(Convert.ToString(convertId.Invoke(selector, new object[] { externalId }), CultureInfo.InvariantCulture) == handle,
+                        "selector did not round-trip Brimstone external ID to MEGA handle");
 
-            foreach (var folder in rootFolders)
-            {
-                var id = Property(folder, "ID");
-                var childFolders = Objects(getFolders.Invoke(folderDao, new object[] { id }));
-                var childFiles = Objects(getFiles.Invoke(fileDao, new object[] { id }));
-                if (childFolders.Count + childFiles.Count > 0)
+                Console.WriteLine((isFolder ? "FOLDER: " : "FILE:   ") + name + " | H:" + handle + " | " + externalId);
+
+                if (selectedFolder == null && isFolder)
                 {
-                    selected = folder;
-                    selectedFolders = childFolders;
-                    selectedFiles = childFiles;
-                    break;
+                    selectedFolder = entry;
+                    selectedHandle = handle;
+                    selectedExternalId = externalId;
                 }
             }
+            Require(selectedFolder != null, "root DAO transport returned no folder to use for nested handle browse");
+            Console.WriteLine("PASS: root DAO transport returned " + rootEntries.Count + " handle-native entrie(s)");
 
-            Require(selected != null, "no root folder exposed any nested DAO entries");
-            Console.WriteLine("=== BRIMSTONE HANDLE-NATIVE SUBFOLDER DAO BROWSE ===");
-            Console.WriteLine("selected root folder: " + Convert.ToString(Property(selected, "Title"), CultureInfo.InvariantCulture));
-            foreach (var folder in selectedFolders)
+            Console.WriteLine("=== BRIMSTONE HANDLE-NATIVE NESTED DAO TRANSPORT BROWSE ===");
+            Console.WriteLine("selected root folder: " + Convert.ToString(Property(selectedFolder, "Name"), CultureInfo.InvariantCulture));
+            var childEntries = Objects(getCloudItems.Invoke(folderDao, new object[] { selectedExternalId }));
+            Require(childEntries.Count > 0, "nested DAO transport returned no entries");
+
+            string firstFolderName = null;
+            string firstFileName = null;
+            foreach (var entry in childEntries)
             {
-                var title = Convert.ToString(Property(folder, "Title"), CultureInfo.InvariantCulture);
-                var id = Convert.ToString(Property(folder, "ID"), CultureInfo.InvariantCulture);
-                Require(id.StartsWith(ExpectedPrefix + "-", StringComparison.Ordinal), "nested folder ID is outside Brimstone handle namespace");
-                Console.WriteLine("FOLDER: " + title + " | " + id);
+                var handle = Convert.ToString(Property(entry, "Handle"), CultureInfo.InvariantCulture);
+                var parent = Convert.ToString(Property(entry, "ParentHandle"), CultureInfo.InvariantCulture);
+                var name = Convert.ToString(Property(entry, "Name"), CultureInfo.InvariantCulture);
+                var isFolder = BoolProperty(entry, "IsFolder");
+                var isFile = BoolProperty(entry, "IsFile");
+                Require(parent == selectedHandle, "nested entry parent handle mismatch");
+                Require(isFolder || isFile, "nested entry has unsupported MEGA type");
+
+                var externalId = Convert.ToString(makeId.Invoke(folderDao, new object[] { handle }), CultureInfo.InvariantCulture);
+                Require(externalId.StartsWith(ExpectedPrefix + "-", StringComparison.Ordinal), "nested entry ID is outside Brimstone handle namespace");
+                Require(Convert.ToString(convertId.Invoke(selector, new object[] { externalId }), CultureInfo.InvariantCulture) == handle,
+                        "nested selector ID round-trip failed");
+
+                Console.WriteLine((isFolder ? "FOLDER: " : "FILE:   ") + name + " | H:" + handle + " | " + externalId);
+                if (isFolder && firstFolderName == null) firstFolderName = name;
+                if (isFile && firstFileName == null) firstFileName = name;
             }
-            foreach (var file in selectedFiles)
+            Console.WriteLine("PASS: nested DAO transport returned " + childEntries.Count + " handle-native entrie(s)");
+
+            // Exercise the concrete folder/file DAOs without projecting to
+            // ONLYOFFICE Folder/File objects (which requires CoreContext tenant
+            // bootstrap in a real WebStudio process).
+            if (firstFolderName != null)
             {
-                var title = Convert.ToString(Property(file, "Title"), CultureInfo.InvariantCulture);
-                var id = Convert.ToString(Property(file, "ID"), CultureInfo.InvariantCulture);
-                Require(id.StartsWith(ExpectedPrefix + "-", StringComparison.Ordinal), "file ID is outside Brimstone handle namespace");
-                Console.WriteLine("FILE:   " + title + " | " + id);
+                var folderExists = folderDaoType.GetMethod("IsExist", new Type[] { typeof(string), typeof(string) });
+                Require(folderExists != null, "FolderDao.IsExist missing");
+                Require((bool)folderExists.Invoke(folderDao, new object[] { firstFolderName, selectedExternalId }),
+                        "FolderDao.IsExist failed for known MEGA child folder");
+                Console.WriteLine("PASS: concrete FolderDao.IsExist resolved known nested folder");
             }
-            Require(selectedFolders.Count + selectedFiles.Count > 0, "nested browse returned no entries");
-            Console.WriteLine("PASS: nested DAO browse returned " + selectedFolders.Count + " folder(s) and " + selectedFiles.Count + " file(s)");
+
+            if (firstFileName != null)
+            {
+                var fileExists = fileDaoType.GetMethod("IsExist", new Type[] { typeof(string), typeof(object) });
+                Require(fileExists != null, "FileDao.IsExist missing");
+                Require((bool)fileExists.Invoke(fileDao, new object[] { firstFileName, selectedExternalId }),
+                        "FileDao.IsExist failed for known MEGA child file");
+                Console.WriteLine("PASS: concrete FileDao.IsExist resolved known nested file");
+            }
 
             var disposable1 = folderDao as IDisposable;
             var disposable2 = fileDao as IDisposable;
@@ -269,7 +356,8 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
             if (disposable2 != null) disposable2.Dispose();
             if (disposable3 != null) disposable3.Dispose();
 
-            Console.WriteLine("BRIMSTONE: ProviderInfo -> DAO -> handle-native MEGA browse PASS");
+            Console.WriteLine("BRIMSTONE: ProviderInfo -> DAO transport/identity -> handle-native MEGA browse PASS");
+            Console.WriteLine("NOTE: ONLYOFFICE Folder/File projection intentionally deferred to live tenant-context test");
             return 0;
         }
         catch (TargetInvocationException ex)
@@ -287,7 +375,7 @@ internal static class BrimstoneMegaCloudRuntimeSmoke
 CS
 
     echo
-    echo "=== RUN DISPOSABLE PROVIDER/DAO SMOKE ==="
+    echo "=== RUN DISPOSABLE PROVIDER/DAO TRANSPORT SMOKE ==="
     docker run --rm \
         --entrypoint /bin/bash \
         -v "$ROOT:/work" \
@@ -304,19 +392,9 @@ mcs -optimize+ -out:"$SMOKE/BrimstoneMegaCloudRuntimeSmoke.exe" "$SMOKE/Brimston
 mono "$SMOKE/BrimstoneMegaCloudRuntimeSmoke.exe" "$CANDIDATE" "'"$slot"'"
 '
 
-    local live_after session_after
-    live_after="$(live_hash)"
-    session_after="$(sha256sum "$source_session" | awk '{print $1}')"
-    [[ "$live_after" == "$live_before" ]] || fail "live ASC.Files.Thirdparty.dll changed during disposable smoke"
-    [[ "$session_after" == "$session_before" ]] || fail "original saved MEGA session changed during disposable smoke"
-
     echo
-    echo "=== BRIMSTONE v0.002cc RUNTIME SMOKE PASS ==="
+    echo "=== BRIMSTONE v0.002cc DISPOSABLE TRANSPORT SMOKE PASS ==="
     echo "candidate:           $(sha256sum "$CANDIDATE" | awk '{print $1}')"
-    echo "live DLL before:     $live_before"
-    echo "live DLL after:      $live_after"
-    echo "source session hash: $session_after"
-    echo "original session:    NOT MODIFIED"
     echo "database:            NOT TOUCHED"
     echo "live stack:          NOT MODIFIED"
 }
