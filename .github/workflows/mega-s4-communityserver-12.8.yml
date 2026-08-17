@@ -1,0 +1,123 @@
+name: MEGA S4 - CommunityServer 12.8 compile
+
+on:
+  push:
+    branches:
+      - feature/mega-s4
+    paths:
+      - 'src/mega-s4/**'
+      - 'scripts/**'
+      - '.github/workflows/mega-s4-communityserver-12.8.yml'
+  pull_request:
+    paths:
+      - 'src/mega-s4/**'
+      - 'scripts/**'
+      - '.github/workflows/mega-s4-communityserver-12.8.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout connector repository
+        uses: actions/checkout@v4
+
+      - name: Checkout exact ONLYOFFICE CommunityServer baseline
+        uses: actions/checkout@v4
+        with:
+          repository: ONLYOFFICE/CommunityServer
+          ref: fe1fa7babd093969e939ba6ff45a9fee1299dc93
+          path: upstream
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Stage MEGA S4 provider source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $env:GITHUB_WORKSPACE 'src/mega-s4/communityserver-12.8/MegaS4'
+          $dst = Join-Path $env:GITHUB_WORKSPACE 'upstream/module/ASC.Files.Thirdparty/MegaS4'
+          if (!(Test-Path $src)) { throw "MEGA S4 source directory missing: $src" }
+          if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+          Copy-Item -Recurse -Force $src $dst
+          Write-Host "Staged MEGA S4 source files:"
+          Get-ChildItem $dst -File | Sort-Object Name | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Apply exact CommunityServer integration changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $patcher = Join-Path $env:GITHUB_WORKSPACE 'scripts/patch-communityserver-12.8-mega-s4.py'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'upstream'
+          if (!(Test-Path $patcher)) { throw "Patcher missing: $patcher" }
+          & python $patcher $upstream
+          if ($LASTEXITCODE -ne 0) { throw "MEGA S4 patcher failed with exit code $LASTEXITCODE" }
+          Push-Location $upstream
+          try {
+            & git -c core.whitespace=cr-at-eol diff --check
+            if ($LASTEXITCODE -ne 0) { throw "git diff --check failed with exit code $LASTEXITCODE" }
+            Write-Host '=== INTEGRATION DIFF ==='
+            & git diff --stat
+            if ($LASTEXITCODE -ne 0) { throw "git diff --stat failed with exit code $LASTEXITCODE" }
+          }
+          finally {
+            Pop-Location
+          }
+
+      - name: Restore and compile ASC.Files.Thirdparty with project references
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $upstream = Join-Path $env:GITHUB_WORKSPACE 'upstream'
+          Push-Location $upstream
+          try {
+            & msbuild 'module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj' /m /restore /t:Build /p:Configuration=Release /p:Platform=AnyCPU /p:RestoreIgnoreFailedSources=true /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
+          }
+          finally {
+            Pop-Location
+          }
+
+      - name: Confirm compiled provider source is included
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $project = Get-Content (Join-Path $env:GITHUB_WORKSPACE 'upstream/module/ASC.Files.Thirdparty/ASC.Files.Thirdparty.csproj') -Raw
+          $required = @(
+            'MegaS4\MegaS4Storage.cs',
+            'MegaS4\MegaS4FileDao.cs',
+            'MegaS4\MegaS4FolderDao.cs',
+            'MegaS4\MegaS4ProviderInfo.cs'
+          )
+          foreach ($item in $required) {
+            if (!$project.Contains($item)) { throw "Project does not include $item" }
+          }
+          Write-Host 'PASS - MEGA S4 provider is present in the exact CommunityServer 12.8 build graph.'
+
+      - name: Record compiled provider hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'upstream/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll'
+          if (!(Test-Path $dll)) { throw "Compiled provider DLL missing: $dll" }
+          Get-Item $dll | Format-List FullName,Length,LastWriteTimeUtc
+          Get-FileHash -Algorithm SHA256 $dll
+
+      - name: Upload compiled MEGA S4 provider DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: mega-s4-communityserver-12.8-provider-${{ github.sha }}
+          path: upstream/web/studio/ASC.Web.Studio/bin/ASC.Files.Thirdparty.dll
+          if-no-files-found: error
+          retention-days: 30
