@@ -145,22 +145,143 @@ msbuild "$PROJECT" /t:Build /p:Configuration=Release /p:Platform=AnyCPU /p:Build
     [[ -s "$CANDIDATE" ]] || fail "candidate DLL was not produced"
 
     echo "=== CANDIDATE VALIDATION ==="
-    docker run --rm -i --entrypoint /bin/bash -v "$BIN:/candidate:ro" "$IMAGE" -s <<'CHECK'
+    docker run --rm -i \
+        --entrypoint /bin/bash \
+        -v "$BIN:/candidate:ro" \
+        "$IMAGE" -s <<'CHECK'
 set -Eeuo pipefail
+
 DLL=/candidate/ASC.Files.Thirdparty.dll
+
 TYPES="$(monodis --typedef "$DLL")"
 STRINGS="$(monodis --userstrings "$DLL")"
-grep -Fq 'ASC.Files.Thirdparty.MegaS4.MegaS4DaoSelector' <<<"$TYPES"
-grep -Fq 'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudDaoSelector' <<<"$TYPES"
-grep -Fq 'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudLsParser' <<<"$TYPES"
-grep -Fq 'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudClient' <<<"$TYPES"
-grep -Fq 'sboxbrimstonemegacc-' <<<"$STRINGS"
-grep -Fq 'Brimstone MEGA Cloud v0.004cc is read-only.' <<<"$STRINGS"
+
+grep -Fq \
+  'ASC.Files.Thirdparty.MegaS4.MegaS4DaoSelector' \
+  <<<"$TYPES"
+
+grep -Fq \
+  'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudDaoSelector' \
+  <<<"$TYPES"
+
+grep -Fq \
+  'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudClient' \
+  <<<"$TYPES"
+
+grep -Fq \
+  'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudFileDao' \
+  <<<"$TYPES"
+
+grep -Fq \
+  'ASC.Files.Thirdparty.BrimstoneMegaCloud.BrimstoneMegaCloudFolderDao' \
+  <<<"$TYPES"
+
+grep -Fq \
+  'sboxbrimstonemegacc-' \
+  <<<"$STRINGS"
+
+# New v0.004cc write-path fingerprints.
+grep -Fq \
+  'Unable to secure staged Brimstone MEGA Cloud upload.' \
+  <<<"$STRINGS"
+
+grep -Fq \
+  'Large chunked MEGA Cloud uploads are not enabled yet.' \
+  <<<"$STRINGS"
+
+grep -Fq \
+  'MEGA Cloud rename is not enabled in v0.004cc create/edit.' \
+  <<<"$STRINGS"
+
+grep -Fq \
+  'Brimstone MEGA Cloud operation is not enabled in v0.004cc create/edit.' \
+  <<<"$STRINGS"
+
 echo 'PASS: accepted MEGA S4 provider remains compiled'
-echo 'PASS: Brimstone MEGA Cloud read-only provider classes compiled'
-echo 'PASS: Brimstone handle ID marker embedded'
-echo 'PASS: v0.002cc write paths fail closed'
+echo 'PASS: Brimstone MEGA Cloud provider remains compiled'
+echo 'PASS: live-path ID namespace remains compiled'
+echo 'PASS: v0.004cc create/edit code is present'
+echo 'PASS: restricted-operation fail-closed code remains present'
 CHECK
+
+    echo
+    echo "=== v0.004cc SOURCE CAPABILITY CONTRACT ==="
+
+    # Writable operations that MUST now exist.
+    grep -Fq \
+      'public File SaveFile(File file, Stream fileStream)' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public File ReplaceFileVersion(File file, Stream fileStream)' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public object SaveFolder(Folder folder)' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+
+    grep -Fq \
+      'public BrimstoneMegaCloudEntry Put(' \
+      "$CLOUD_SRC/BrimstoneMegaCloudClient.cs"
+
+    grep -Fq \
+      'public BrimstoneMegaCloudEntry CreateFolder(' \
+      "$CLOUD_SRC/BrimstoneMegaCloudClient.cs"
+
+    # Old read-only implementations MUST NOT remain on create/edit.
+    if grep -Fq \
+      'public File SaveFile(File file, Stream fileStream) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+    then
+        fail "SaveFile is still read-only"
+    fi
+
+    if grep -Fq \
+      'public object SaveFolder(Folder folder) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+    then
+        fail "SaveFolder is still read-only"
+    fi
+
+    echo "PASS: file create/save enabled"
+    echo "PASS: file version replacement enabled"
+    echo "PASS: folder create enabled"
+
+    echo
+    echo "=== DESTRUCTIVE OPERATIONS MUST STILL FAIL CLOSED ==="
+
+    grep -Fq \
+      'public void DeleteFile(object fileId) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public object MoveFile(object fileId, object toFolderId) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public File CopyFile(object fileId, object toFolderId) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public object FileRename(File file, string newTitle) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFileDao.cs"
+
+    grep -Fq \
+      'public void DeleteFolder(object folderId) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+
+    grep -Fq \
+      'public object MoveFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+
+    grep -Fq \
+      'public Folder CopyFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }' \
+      "$CLOUD_SRC/BrimstoneMegaCloudFolderDao.cs"
+
+    echo "PASS: delete remains disabled"
+    echo "PASS: move remains disabled"
+    echo "PASS: copy remains disabled"
+    echo "PASS: rename remains disabled"
 
     echo
     echo "=== BRIMSTONE MEGA CLOUD v0.004cc COMPILE-ONLY PASS ==="

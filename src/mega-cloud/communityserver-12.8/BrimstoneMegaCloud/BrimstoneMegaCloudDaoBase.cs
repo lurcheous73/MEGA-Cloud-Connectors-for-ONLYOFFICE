@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using ASC.Core.Tenants;
 using ASC.Files.Core;
@@ -166,9 +167,108 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             return entries.Where(x => x.IsFile);
         }
 
+        protected static string ParentRemotePath(string remotePath)
+        {
+            remotePath = BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            if (remotePath == "/")
+                return "/";
+
+            var slash = remotePath.LastIndexOf('/');
+            return slash <= 0 ? "/" : remotePath.Substring(0, slash);
+        }
+
+        protected static string RemoteLeaf(string remotePath)
+        {
+            remotePath = BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            if (remotePath == "/")
+                return string.Empty;
+
+            var slash = remotePath.LastIndexOf('/');
+            return slash < 0
+                ? remotePath
+                : remotePath.Substring(slash + 1);
+        }
+
+        protected static string CombineRemotePath(string parentPath,
+                                                  string name)
+        {
+            parentPath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(parentPath);
+
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("MEGA node name is empty.", "name");
+
+            if (name.IndexOf('/') >= 0 || name.IndexOf('\0') >= 0)
+                throw new ArgumentException("Invalid MEGA node name.", "name");
+
+            if (name == "." || name == "..")
+                throw new ArgumentException("Invalid MEGA node name.", "name");
+
+            // DO NOT trim or normalise the node name. Spaces, including trailing
+            // spaces, are part of the real MEGA object identity.
+            return parentPath == "/"
+                ? "/" + name
+                : parentPath + "/" + name;
+        }
+
+        protected string GetAvailableTitle(string requestedTitle,
+                                           string parentPath,
+                                           Func<string, string, bool> exists)
+        {
+            if (!exists(requestedTitle, parentPath))
+                return requestedTitle;
+
+            var re =
+                new Regex(@"( \((?<index>[0-9]+)\)(\.[^\.]*)?)$");
+
+            var match = re.Match(requestedTitle);
+
+            if (!match.Success)
+            {
+                var insert =
+                    requestedTitle.LastIndexOf(
+                        ".",
+                        StringComparison.InvariantCulture);
+
+                if (insert < 0)
+                    insert = requestedTitle.Length;
+
+                requestedTitle =
+                    requestedTitle.Insert(insert, " (1)");
+            }
+
+            while (exists(requestedTitle, parentPath))
+            {
+                requestedTitle =
+                    re.Replace(
+                        requestedTitle,
+                        delegate(Match m)
+                        {
+                            var index =
+                                Convert.ToInt32(
+                                    m.Groups["index"].Value);
+
+                            var marker =
+                                string.Format(" ({0})", index);
+
+                            var tail =
+                                m.Value.Substring(marker.Length);
+
+                            return string.Format(
+                                " ({0}){1}",
+                                index + 1,
+                                tail);
+                        });
+            }
+
+            return requestedTitle;
+        }
+
         protected static NotSupportedException ReadOnly()
         {
-            return new NotSupportedException("Brimstone MEGA Cloud v0.003cc is read-only.");
+            return new NotSupportedException("Brimstone MEGA Cloud operation is not enabled in v0.004cc create/edit.");
         }
     }
 }

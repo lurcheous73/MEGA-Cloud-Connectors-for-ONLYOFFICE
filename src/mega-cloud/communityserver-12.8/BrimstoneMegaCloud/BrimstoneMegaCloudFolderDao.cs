@@ -6,6 +6,7 @@ using System.Threading;
 using ASC.Core.ChunkedUploader;
 using ASC.Data.Storage.ZipOperators;
 using ASC.Files.Core;
+using ASC.Web.Studio.Core;
 
 namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
 {
@@ -114,7 +115,36 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             return result;
         }
 
-        public object SaveFolder(Folder folder) { throw ReadOnly(); }
+        public object SaveFolder(Folder folder)
+        {
+            if (folder == null)
+                throw new ArgumentNullException("folder");
+
+            // Existing folder IDs mean rename in ONLYOFFICE. Keep that disabled
+            // for this milestone; only creation is enabled.
+            if (folder.ID != null)
+                throw new NotSupportedException(
+                    "MEGA Cloud folder rename is not enabled in v0.004cc create/edit.");
+
+            if (folder.ParentFolderID == null)
+                throw new ArgumentException(
+                    "ParentFolderID is required for a new MEGA Cloud folder.",
+                    "folder");
+
+            var parentPath =
+                DecodeId(folder.ParentFolderID);
+
+            folder.Title =
+                GetAvailableTitle(
+                    folder.Title,
+                    parentPath,
+                    FolderExists);
+
+            return MakeId(
+                ProviderInfo.Client.CreateFolder(
+                    parentPath,
+                    folder.Title));
+        }
         public void DeleteFolder(object folderId) { throw ReadOnly(); }
         public object MoveFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }
         public Folder CopyFolder(object folderId, object toFolderId, CancellationToken? cancellationToken) { throw ReadOnly(); }
@@ -146,7 +176,10 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public bool UseTrashForRemove(Folder folder) { return false; }
         public bool UseRecursiveOperation(object folderId, object toRootFolderId) { return false; }
         public bool CanCalculateSubitems(object entryId) { return false; }
-        public long GetMaxUploadSize(object folderId, bool chunkedUpload = false) { return 0; }
+        public long GetMaxUploadSize(object folderId, bool chunkedUpload = false)
+        {
+            return SetupInfo.AvailableFileSize;
+        }
 
         public IDataWriteOperator CreateDataWriteOperator(string folderId,
                                                            CommonChunkedUploadSession chunkedUploadSession,
@@ -170,6 +203,17 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public object GetFolderIDProjects(bool createIfNotExists) { return null; }
         public string GetBunchObjectID(object folderID) { return null; }
         public Dictionary<string, string> GetBunchObjectIDs(IEnumerable<object> folderIDs) { return null; }
+
+        private bool FolderExists(string title,
+                                  string parentPath)
+        {
+            return ProviderInfo.Client.ListChildren(parentPath)
+                .Any(x =>
+                    x.IsFolder
+                    && x.Name.Equals(
+                        title,
+                        StringComparison.InvariantCultureIgnoreCase));
+        }
 
         public bool IsExist(string title, string folderId)
         {

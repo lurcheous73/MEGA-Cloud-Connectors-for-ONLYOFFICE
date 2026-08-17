@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using ASC.Files.Core;
 using ASC.Web.Core.Files;
+using ASC.Web.Studio.Core;
 
 using File = ASC.Files.Core.File;
 
@@ -107,8 +108,65 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public Uri GetPreSignedUri(File file, TimeSpan expires) { throw ReadOnly(); }
         public bool IsSupportedPreSignedUri(File file) { return false; }
 
-        public File SaveFile(File file, Stream fileStream) { throw ReadOnly(); }
-        public File ReplaceFileVersion(File file, Stream fileStream) { throw ReadOnly(); }
+        public File SaveFile(File file, Stream fileStream)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            if (fileStream == null)
+                throw new ArgumentNullException("fileStream");
+
+            string remotePath;
+
+            if (file.ID != null)
+            {
+                // Editing is allowed. Rename is deliberately NOT part of this
+                // milestone; the path identity must remain stable.
+                remotePath = DecodeId(file.ID);
+
+                var currentName = RemoteLeaf(remotePath);
+
+                if (!string.Equals(
+                        file.Title,
+                        currentName,
+                        StringComparison.Ordinal))
+                {
+                    throw new NotSupportedException(
+                        "MEGA Cloud rename is not enabled in v0.004cc create/edit.");
+                }
+            }
+            else
+            {
+                if (file.FolderID == null)
+                    throw new ArgumentException(
+                        "FolderID is required for a new MEGA Cloud file.",
+                        "file");
+
+                var parentPath =
+                    DecodeId(file.FolderID);
+
+                file.Title =
+                    GetAvailableTitle(
+                        file.Title,
+                        parentPath,
+                        IsExist);
+
+                remotePath =
+                    CombineRemotePath(
+                        parentPath,
+                        file.Title);
+            }
+
+            return ToFile(
+                ProviderInfo.Client.Put(
+                    remotePath,
+                    fileStream));
+        }
+
+        public File ReplaceFileVersion(File file, Stream fileStream)
+        {
+            return SaveFile(file, fileStream);
+        }
         public void DeleteFile(object fileId, Guid ownerId) { throw ReadOnly(); }
         public void DeleteFile(object fileId) { throw ReadOnly(); }
 
@@ -128,11 +186,98 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         public void ContinueVersion(object fileId, int fileVersion) { }
         public bool UseTrashForRemove(File file) { return false; }
 
-        public ChunkedUploadSession CreateUploadSession(File file, long contentLength) { throw ReadOnly(); }
-        public File UploadChunk(ChunkedUploadSession session, Stream chunkStream, long chunkLength) { throw ReadOnly(); }
-        public Task UploadChunkAsync(ChunkedUploadSession session, Stream chunkStream, long chunkLength) { throw ReadOnly(); }
-        public File FinalizeUploadSession(ChunkedUploadSession session) { throw ReadOnly(); }
-        public void AbortUploadSession(ChunkedUploadSession session) { throw ReadOnly(); }
+        private File RestoreIds(File file)
+        {
+            if (file == null)
+                return null;
+
+            if (file.ID != null)
+                file.ID = MakeId(DecodeId(file.ID));
+
+            if (file.FolderID != null)
+                file.FolderID = MakeId(DecodeId(file.FolderID));
+
+            return file;
+        }
+
+        public ChunkedUploadSession CreateUploadSession(File file,
+                                                        long contentLength)
+        {
+            if (file == null)
+                throw new ArgumentNullException("file");
+
+            // v0.004cc first write milestone intentionally supports normal
+            // editor/new-document uploads only. True multi-request chunk
+            // staging comes after create/edit acceptance.
+            if (contentLength >= 0
+                && SetupInfo.ChunkUploadSize <= contentLength)
+            {
+                throw new NotSupportedException(
+                    "Large chunked MEGA Cloud uploads are not enabled yet.");
+            }
+
+            return new ChunkedUploadSession(
+                RestoreIds(file),
+                contentLength)
+            {
+                UseChunks = false
+            };
+        }
+
+        public File UploadChunk(ChunkedUploadSession session,
+                                Stream chunkStream,
+                                long chunkLength)
+        {
+            if (session == null)
+                throw new ArgumentNullException("session");
+
+            if (chunkStream == null)
+                throw new ArgumentNullException("chunkStream");
+
+            if (session.UseChunks)
+                throw new NotSupportedException(
+                    "Large chunked MEGA Cloud uploads are not enabled yet.");
+
+            if (session.BytesTotal == 0)
+                session.BytesTotal = chunkLength;
+
+            session.File =
+                SaveFile(
+                    session.File,
+                    chunkStream);
+
+            session.BytesUploaded = chunkLength;
+
+            return session.File;
+        }
+
+        public Task UploadChunkAsync(ChunkedUploadSession session,
+                                     Stream chunkStream,
+                                     long chunkLength)
+        {
+            UploadChunk(
+                session,
+                chunkStream,
+                chunkLength);
+
+            return Task.FromResult(0);
+        }
+
+        public File FinalizeUploadSession(ChunkedUploadSession session)
+        {
+            if (session == null)
+                throw new ArgumentNullException("session");
+
+            if (session.UseChunks)
+                throw new NotSupportedException(
+                    "Large chunked MEGA Cloud uploads are not enabled yet.");
+
+            return session.File;
+        }
+
+        public void AbortUploadSession(ChunkedUploadSession session)
+        {
+        }
 
         public void ReassignFiles(IEnumerable<object> fileIds, Guid newOwnerId) { }
 

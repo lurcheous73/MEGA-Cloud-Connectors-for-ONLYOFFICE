@@ -256,6 +256,133 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             }
         }
 
+        public BrimstoneMegaCloudEntry CreateFolder(string parentPath,
+                                                         string name)
+        {
+            parentPath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(parentPath);
+
+            ValidateNodeName(name);
+
+            var remotePath =
+                CombineRemotePath(parentPath, name);
+
+            DenyReservedPath(remotePath);
+
+            RunReadOnly(
+                "mkdir " + QuoteArgument(remotePath));
+
+            var created = GetEntry(remotePath);
+
+            if (created == null || !created.IsFolder)
+                throw new InvalidOperationException(
+                    "Brimstone MEGA Cloud folder creation could not be verified.");
+
+            return created;
+        }
+
+        public BrimstoneMegaCloudEntry Put(string remotePath,
+                                           Stream source)
+        {
+            if (source == null)
+                throw new ArgumentNullException("source");
+
+            remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            DenyReservedPath(remotePath);
+
+            if (remotePath == "/")
+                throw new ArgumentException(
+                    "MEGA Cloud root cannot be written as a file.",
+                    "remotePath");
+
+            var name = RemoteLeaf(remotePath);
+            ValidateNodeName(name);
+
+            var parentPath = ParentRemotePath(remotePath);
+            DenyReservedPath(parentPath);
+
+            var uploadRoot =
+                Path.Combine(slotRoot, "uploads");
+
+            Directory.CreateDirectory(uploadRoot);
+
+            if (chmod(uploadRoot, Mode0700) != 0)
+                throw new InvalidOperationException(
+                    "Unable to secure Brimstone MEGA Cloud upload directory.");
+
+            var tempDirectory =
+                Path.Combine(
+                    uploadRoot,
+                    Guid.NewGuid().ToString("N"));
+
+            Directory.CreateDirectory(tempDirectory);
+
+            if (chmod(tempDirectory, Mode0700) != 0)
+            {
+                try { Directory.Delete(tempDirectory, true); }
+                catch { }
+
+                throw new InvalidOperationException(
+                    "Unable to secure Brimstone MEGA Cloud temporary upload directory.");
+            }
+
+            try
+            {
+                // The local basename deliberately equals the exact MEGA basename.
+                // Do not trim it: trailing spaces must survive round-trip.
+                var localFile =
+                    Path.Combine(tempDirectory, name);
+
+                using (var output =
+                    new FileStream(
+                        localFile,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        65536,
+                        FileOptions.SequentialScan))
+                {
+                    source.CopyTo(output);
+                    output.Flush();
+                }
+
+                if (chmod(localFile, Mode0600) != 0)
+                    throw new InvalidOperationException(
+                        "Unable to secure staged Brimstone MEGA Cloud upload.");
+
+                // MEGA versioning was acceptance-tested on this account:
+                // PUT of the same basename to the same parent creates a new
+                // version while the live remote path remains stable.
+                RunReadOnly(
+                    "put "
+                    + QuoteArgument(localFile)
+                    + " "
+                    + QuoteArgument(parentPath),
+                    DownloadTimeoutMilliseconds);
+
+                var saved = GetEntry(remotePath);
+
+                if (saved == null || !saved.IsFile)
+                    throw new InvalidOperationException(
+                        "Brimstone MEGA Cloud upload could not be verified.");
+
+                return saved;
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(tempDirectory))
+                        Directory.Delete(tempDirectory, true);
+                }
+                catch
+                {
+                }
+            }
+        }
+
         public void Dispose()
         {
         }
@@ -306,6 +433,59 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                     }
                 }
             }
+        }
+
+        private static void ValidateNodeName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException(
+                    "MEGA node name is empty.",
+                    "name");
+
+            if (name.IndexOf('/') >= 0 || name.IndexOf('\0') >= 0)
+                throw new ArgumentException(
+                    "Invalid MEGA node name.",
+                    "name");
+
+            if (name == "." || name == "..")
+                throw new ArgumentException(
+                    "Invalid MEGA node name.",
+                    "name");
+        }
+
+        private static string ParentRemotePath(string remotePath)
+        {
+            remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            var slash = remotePath.LastIndexOf('/');
+
+            return slash <= 0
+                ? "/"
+                : remotePath.Substring(0, slash);
+        }
+
+        private static string RemoteLeaf(string remotePath)
+        {
+            remotePath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(remotePath);
+
+            var slash = remotePath.LastIndexOf('/');
+
+            return slash < 0
+                ? remotePath
+                : remotePath.Substring(slash + 1);
+        }
+
+        private static string CombineRemotePath(string parentPath,
+                                                string name)
+        {
+            parentPath =
+                BrimstoneMegaCloudId.NormalizeRemotePath(parentPath);
+
+            return parentPath == "/"
+                ? "/" + name
+                : parentPath + "/" + name;
         }
 
         private static void DenyReservedPath(string remotePath)
@@ -468,7 +648,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                         error = error.Substring(0, 2048);
 
                     throw new InvalidOperationException(
-                        "Brimstone MEGA Cloud MEGAcmd browse failed: "
+                        "Brimstone MEGA Cloud MEGAcmd command failed: "
                         + error);
                 }
 
