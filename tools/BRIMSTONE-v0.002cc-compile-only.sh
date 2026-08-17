@@ -63,6 +63,17 @@ prepare_worktree(){
 
     python3 "$S4_PREP" "$DEV"
     python3 "$CLOUD_PREP" "$DEV"
+
+    echo "=== BRIMSTONE PROVIDER REGISTRATION SOURCE CONTRACT ==="
+    grep -Fq '            BrimstoneMegaCloud,' "$DIR/ProviderAccountDao.cs" ||
+        fail "BrimstoneMegaCloud provider enum was not prepared"
+    grep -Fq 'return new BrimstoneMegaCloudProviderInfo(' "$DIR/ProviderAccountDao.cs" ||
+        fail "BrimstoneMegaCloud provider materialisation was not prepared"
+    grep -Fq 'case ProviderTypes.BrimstoneMegaCloud:' "$DIR/ProviderAccountDao.cs" ||
+        fail "BrimstoneMegaCloud state-slot handling was not prepared"
+    grep -Fq 'Selectors.Add(new BrimstoneMegaCloudDaoSelector());' "$DIR/ProviderDao/ProviderDaoBase.cs" ||
+        fail "BrimstoneMegaCloud selector registration was not prepared"
+    echo "PASS: provider enum, materialisation, state-slot handling and selector registration are present"
 }
 
 stage_reference_bin(){
