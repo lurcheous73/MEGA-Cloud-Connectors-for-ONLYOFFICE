@@ -96,7 +96,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                 + QuoteArgument(parentPath));
 
             var entries =
-                BrimstoneMegaCloudLsParser.Parse(stdout, string.Empty);
+                BrimstoneMegaCloudLsParser.Parse(stdout);
 
             foreach (var entry in entries)
             {

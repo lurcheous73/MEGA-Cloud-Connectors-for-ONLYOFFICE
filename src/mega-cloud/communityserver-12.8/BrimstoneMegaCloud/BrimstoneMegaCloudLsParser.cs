@@ -15,7 +15,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             @"^(?<flags>\S+)\s+(?<versions>\S+)\s+(?<size>\S+)\s+(?<date>\S+)\s+H:(?<handle>[A-Za-z0-9_-]+)\s(?<name>.*)$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-        public static List<BrimstoneMegaCloudEntry> Parse(string output, string parentHandle)
+        public static List<BrimstoneMegaCloudEntry> Parse(string output)
         {
             var result = new List<BrimstoneMegaCloudEntry>();
             if (string.IsNullOrEmpty(output)) return result;
@@ -24,7 +24,9 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
             foreach (var raw in lines)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                var line = raw.TrimEnd();
+                // Do NOT TrimEnd here. Trailing whitespace can be part of
+                // the actual MEGA node name and therefore part of its remote path.
+                var line = raw;
                 if (line.StartsWith("FLAGS ", StringComparison.Ordinal)) continue;
 
                 var match = Row.Match(line);
