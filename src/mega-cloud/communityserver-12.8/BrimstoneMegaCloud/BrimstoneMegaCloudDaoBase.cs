@@ -4,6 +4,8 @@ using System.Linq;
 
 using ASC.Core.Tenants;
 using ASC.Files.Core;
+using ASC.Files.Core.Security;
+using ASC.Web.Files.Classes;
 
 using File = ASC.Files.Core.File;
 
