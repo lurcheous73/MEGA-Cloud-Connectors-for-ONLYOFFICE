@@ -11,7 +11,6 @@ BUILD_ROOT="$ROOT/build/mega-cloud-v0.001cc"
 SDK_SRC="$BUILD_ROOT/mega-sdk"
 VCPKG_SRC="$BUILD_ROOT/vcpkg"
 SDK_BUILD="$BUILD_ROOT/sdk-build"
-SDK_PREFIX="$BUILD_ROOT/sdk-prefix"
 PROBE_BUILD="$BUILD_ROOT/probe-build"
 STATE_DIR="$BUILD_ROOT/state"
 PROBE_BIN="$PROBE_BUILD/brimstone-mega-cloud-probe"
@@ -68,7 +67,7 @@ build_probe() {
     preflight
     mkdir -p "$BUILD_ROOT"
 
-    info "building in disposable $BUILDER_IMAGE container; first vcpkg build can take a while"
+    info "building in disposable $BUILDER_IMAGE container; existing vcpkg/SDK build state will be reused"
 
     docker run --rm \
         --entrypoint /bin/bash \
@@ -97,7 +96,6 @@ BUILD_ROOT=/work/build/mega-cloud-v0.001cc
 SDK_SRC=$BUILD_ROOT/mega-sdk
 VCPKG_SRC=$BUILD_ROOT/vcpkg
 SDK_BUILD=$BUILD_ROOT/sdk-build
-SDK_PREFIX=$BUILD_ROOT/sdk-prefix
 PROBE_BUILD=$BUILD_ROOT/probe-build
 
 fetch_exact() {
@@ -121,11 +119,24 @@ fetch_exact() {
 fetch_exact https://github.com/meganz/sdk.git "$SDK_SRC" "$BRIMSTONE_MEGA_SDK_COMMIT"
 fetch_exact https://github.com/microsoft/vcpkg.git "$VCPKG_SRC" "$BRIMSTONE_VCPKG_BASELINE"
 
+# BRIMSTONE: make every invocation reproducible even after a previous run
+# injected the probe subdirectory into the disposable SDK checkout.
+git -C "$SDK_SRC" reset --hard "$BRIMSTONE_MEGA_SDK_COMMIT" >/dev/null
+
+BRIMSTONE_MARKER="# BRIMSTONE v0.001cc native probe target"
+cat >> "$SDK_SRC/CMakeLists.txt" <<EOF
+
+$BRIMSTONE_MARKER
+# BRIMSTONE CUSTOM CODE: compile the connector probe inside the pinned SDK
+# project so MEGA::SDKlib and all vcpkg transitive dependencies remain native
+# CMake targets. This avoids relying on an SDKlibConfig.cmake install package.
+add_subdirectory("/work/src/mega-cloud/native" "$PROBE_BUILD")
+EOF
+
 "$VCPKG_SRC/bootstrap-vcpkg.sh" -disableMetrics
 
 cmake -G Ninja -S "$SDK_SRC" -B "$SDK_BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX="$SDK_PREFIX" \
     -DVCPKG_ROOT="$VCPKG_SRC" \
     -DBUILD_SHARED_LIBS=OFF \
     -DENABLE_SDKLIB_EXAMPLES=OFF \
@@ -144,16 +155,14 @@ cmake -G Ninja -S "$SDK_SRC" -B "$SDK_BUILD" \
     -DUSE_PDFIUM=OFF \
     -DUSE_READLINE=OFF
 
-cmake --build "$SDK_BUILD" --target SDKlib -j"$(nproc)"
-cmake --install "$SDK_BUILD"
-
-cmake -G Ninja -S /work/src/mega-cloud/native -B "$PROBE_BUILD" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="$SDK_PREFIX"
-cmake --build "$PROBE_BUILD" --target BrimstoneMegaCloudProbe -j"$(nproc)"
+cmake --build "$SDK_BUILD" --target BrimstoneMegaCloudProbe -j"$(nproc)"
 
 BIN="$PROBE_BUILD/brimstone-mega-cloud-probe"
-[[ -x $BIN ]]
+[[ -x $BIN ]] || {
+    echo "BRIMSTONE FAIL: build completed without $BIN" >&2
+    exit 1
+}
+
 echo
 echo "=== BRIMSTONE PROBE BUILT ==="
 sha256sum "$BIN"
@@ -201,7 +210,6 @@ run_probe_container() {
         -e BRIMSTONE_MEGA_MFA \
         -e BRIMSTONE_MEGA_USER_AGENT \
         "$BUILDER_IMAGE" -lc "
-export LD_LIBRARY_PATH=/work/build/mega-cloud-v0.001cc/sdk-prefix/lib:/work/build/mega-cloud-v0.001cc/sdk-prefix/lib64:\${LD_LIBRARY_PATH:-}
 export BRIMSTONE_MEGA_CACHE_DIR=/work/build/mega-cloud-v0.001cc/state/cache
 export BRIMSTONE_MEGA_SESSION_FILE=/work/build/mega-cloud-v0.001cc/state/session
 exec /work/build/mega-cloud-v0.001cc/probe-build/brimstone-mega-cloud-probe $mode
