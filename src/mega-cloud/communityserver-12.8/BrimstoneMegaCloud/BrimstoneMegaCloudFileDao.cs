@@ -37,7 +37,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
         {
             return fileIds == null
                 ? new List<File>()
-                : fileIds.Select(GetFile).Where(x => x != null).ToList();
+                : fileIds.Select(x => GetFile(x)).Where(x => x != null).ToList();
         }
 
         public List<File> GetFilesFiltered(IEnumerable<object> fileIds,
@@ -66,7 +66,7 @@ namespace ASC.Files.Thirdparty.BrimstoneMegaCloud
                                    string extension,
                                    bool withSubfolders = false)
         {
-            var files = Files(GetCloudItems(parentId)).Select(ToFile);
+            var files = Files(GetCloudItems(parentId)).Select(x => ToFile(x));
             files = ApplyFilters(files, filterType, subjectID, searchText, extension);
             return Order(files, orderBy).ToList();
         }
