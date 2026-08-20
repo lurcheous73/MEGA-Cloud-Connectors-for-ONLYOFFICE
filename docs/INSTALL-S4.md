@@ -149,6 +149,16 @@ Accepted overlay SHA-256:
 ee90cfbd7e6ed94008e555e501bde917b39677c49da8a47924112c614888f967
 ```
 
+## Known accepted browser limitations
+
+The following limitations were confirmed during Safari acceptance on 20 August 2026 and are part of the accepted working state rather than release blockers:
+
+- A saved MEGA S4 connection must be treated as **immutable**. Credentials, endpoint and bucket selection are not supported as an in-place edit. If any of those settings must change, delete/recreate the connection with the desired values.
+- Safari can retain a stale Connected Clouds JavaScript session in which the existing MEGA S4 account/settings view still opens but **Connect cloud → MEGA S4** does not respond. Opening ONLYOFFICE in a **Safari Private Window** provides a clean session and allows the new MEGA S4 connection workflow to operate normally. Emptying Safari caches and reloading may also clear the condition, but Private Window is the proven workaround.
+- Do not treat the stale-session symptom as evidence that the MEGA S4 provider, handler or stored account is broken when the existing account continues to open.
+
+These limitations should be preserved in operator documentation until the UI layer is deliberately redesigned and browser-tested again.
+
 ## Browser acceptance completed 20 August 2026
 
 The accepted release was tested through the ONLYOFFICE Files UI for:
@@ -161,6 +171,8 @@ The accepted release was tested through the ONLYOFFICE Files UI for:
 - copying
 - renaming
 - deleting
+- opening the MEGA S4 settings view and pulling the live bucket list
+- creating a new MEGA S4 connection from a clean Safari Private Window session
 
 The accepted live combined DLL during that test had SHA-256:
 
