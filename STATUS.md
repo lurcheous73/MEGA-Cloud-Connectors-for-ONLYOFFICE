@@ -1,88 +1,175 @@
-# BRIMSTONE MEGA S4 v0.005 status
+# BRIMSTONE connector status — accepted 20 August 2026
 
-Baseline date: 2026-08-16
-Upstream CommunityServer baseline: `ONLYOFFICE/CommunityServer@fe1fa7babd093969e939ba6ff45a9fee1299dc93`
+Current release branch:
 
-## External MEGA S4 transport — PROVEN
+```text
+release/working-connectors-20260820
+```
 
-Using burnable test credentials and an independently constructed SigV4 request:
+Supported CommunityServer image:
 
-- `GET https://s3.g.megas4.com/` -> HTTP 200 `ListAllMyBucketsResult`.
-- `GET https://s3.g.megas4.com/onlyoffice?list-type=2&max-keys=5` -> HTTP 200 `ListBucketResult`.
-- The Amsterdam endpoint also returned HTTP 200, but the connector baseline remains the global `g` endpoint and signing region `g`.
+```text
+onlyoffice/communityserver:12.8.0.1971
+```
 
-## v0.004 live milestone — CORE LIVE-DRIVE ACCEPTANCE PASSED
+Pinned CommunityServer source commit:
 
-Live `ASC.Files.Thirdparty.dll` SHA256 remains:
+```text
+fe1fa7babd093969e939ba6ff45a9fee1299dc93
+```
 
-`62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f`
+## Shared provider assembly
 
-No DLL change was required to prove the editor-save path after v0.003. v0.004 records the functional acceptance milestone that documents opened from MEGA S4 can be edited in ONLYOFFICE, saved back, closed, reopened, and the edits are still present after a fresh read from MEGA S4.
+`ASC.Files.Thirdparty.dll` contains both custom providers:
 
-The provider ID namespace remains:
+- `ASC.Files.Thirdparty.MegaS4`
+- `ASC.Files.Thirdparty.BrimstoneMegaCloud`
 
-- root: `sboxmega-<providerId>`
-- object/folder: `sboxmega-<providerId>-<base64url-key>`
+Both connector front-ends must preserve this combined-provider contract.
 
-## v0.005 helper-handler milestone — PRECOMPILED ROUTE PROVEN
+The browser-accepted MEGA S4 DLL observed during acceptance had SHA-256:
 
-The MEGA S4 bucket-discovery helper is now installed using the same precompiled ASP.NET pattern as stock ONLYOFFICE handlers:
+```text
+aa5ffeb00446c44eefaf48d91d045271cbf62405fb8753024a10bb7c8bf84226
+```
 
-- physical `/Products/Files/HttpHandlers/brimstone-megas4.ashx` is the stock 86-byte precompilation marker;
-- `/bin/brimstone-megas4.ashx.brimstone.compiled` maps the virtual path directly to `ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler` in `ASC.Files.Thirdparty`;
-- no explicit Brimstone `Web.config` handler mapping is required;
-- the previous Mono dynamic-parser failure (`System.Web.Compilation.ParseException` / missing `System.Runtime, Version=4.0.0.0`) is eliminated.
+Canonical rebuilds are validated by provider/runtime contracts rather than requiring byte-for-byte reproduction of that historical build hash.
 
-Controlled restart acceptance on 2026-08-16:
+## MEGA S4 transport and Files integration — PROVEN
 
-- anonymous local POST to the helper returns HTTP 401 JSON: `{"ok":false,"error":"Authentication required."}`;
-- this proves the compiled Brimstone `IHttpHandler` is instantiated and `ProcessRequest()` is executing;
-- MySQL restart count remained 35 and MySQL `StartedAt` did not change;
-- live connector DLL remained exactly `62bdff5b75ab9db37108a6f772a92240805879f0cf400bb8c2813d2aa68b679f`.
+MEGA S4 remains configured against:
 
-The external-MySQL startup-script guard is also installed: CommunityServer's two plain `mysqladmin shutdown` calls have been replaced with local-socket-only shutdown calls, preventing CommunityServer restarts from shutting down the separate `onlyoffice-mysql-server` container.
+```text
+endpoint: https://s3.g.megas4.com
+signing region: g
+```
 
-## ONLYOFFICE integration — PROVEN
+Direct SigV4 transport previously proved `ListBuckets` and `ListObjectsV2` with HTTP 200 responses.
 
-- Manual credentials plus a manually entered bucket name save successfully.
-- Provider Save persists a MEGA S4 account.
-- The saved MEGA S4 root opens normally in Files.
-- Bucket/prefix browsing works.
-- A folder named `test` created in ONLYOFFICE appeared in the real MEGA S4 `onlyoffice` bucket.
-- Arbitrary image files uploaded through ONLYOFFICE are written successfully to the MEGA S4 root.
-- Arbitrary image files uploaded through ONLYOFFICE are written successfully inside the `test` subfolder.
-- Uploaded MEGA S4 objects open successfully in ONLYOFFICE view mode.
-- Uploaded MEGA S4 objects download successfully through ONLYOFFICE.
-- Documents stored in MEGA S4 open successfully in the ONLYOFFICE editor.
-- Documents opened from MEGA S4 can be modified and saved successfully through ONLYOFFICE.
-- After closing and reopening the same document from MEGA S4, the saved edits remain present, proving remote persistence rather than an editor-local-only save.
-- The earlier `Can not convert id:` upload failure is fixed by restoring external `sboxmega-*` IDs before an upload session leaves the provider DAO and between non-final chunks.
-- The existing MEGA account survives the v0.002 -> v0.003 DLL deployment unchanged.
-- Provider Delete has previously been proven.
-- `CheckAccess()` validates the selected bucket using `ListObjectsV2` before persistence.
+Authenticated ONLYOFFICE Files acceptance now proves:
 
-## Known remaining bugs / polish
+- saved MEGA S4 connection opens normally;
+- bucket/prefix browsing works;
+- folders can be created;
+- files can be created/written;
+- objects can be moved;
+- objects can be copied;
+- files/folders can be renamed;
+- delete works;
+- saved connection settings open;
+- `Pull buckets` returns the live S4 bucket list;
+- a new connection can be created from a clean Safari Private Window session.
 
-1. **Authenticated bucket helper UI acceptance** — the server route now executes correctly as a native precompiled handler. `Pull buckets` still needs one authenticated Files-UI acceptance using typed credentials to prove the browser request carries the ONLYOFFICE authentication context and receives the MEGA S4 bucket list.
-2. **Existing account editor** — existing MEGA accounts still need a proper Brimstone editor rather than the stock Connection URL / Password / Folder title form.
-3. **Shared credential import UX** — server-side import is retained; prove authenticated bucket discovery from the shared S3-Compatible credential store after the typed-credential path is accepted.
-4. **Large/chunked upload acceptance** — explicit upload above the chunk threshold remains to be tested.
+## Accepted ID namespace
 
-## Core acceptance — PASSED
+The browser-tested namespace is:
 
-1. Connect MEGA S4 account — PASS (manual credentials/manual bucket).
-2. Browse bucket/prefix tree — PASS.
-3. Create remote folder from ONLYOFFICE — PASS.
-4. Upload arbitrary object to bucket root — PASS.
-5. Upload arbitrary object to subfolder — PASS.
-6. View arbitrary object through ONLYOFFICE — PASS.
-7. Download arbitrary object through ONLYOFFICE — PASS.
-8. Open document in ONLYOFFICE editor — PASS.
-9. Edit and save changes back through ONLYOFFICE — PASS.
-10. Close/reopen and independently verify the edited content was re-read from MEGA S4 — PASS.
+```text
+sboxmega-<providerId>
+sboxmega-<providerId>-<base64url-key>
+```
 
-The core MEGA S4 live-drive objective is therefore achieved. Remaining work is connection UX/polish rather than basic read/write/editor transport.
+The historical/intermediate namespace:
 
-## Archive
+```text
+sbox-megas4-
+```
 
-Pre-cleanup experimentation is preserved at `archive/pre-v0.001-20260816`.
+must not be compiled or deployed.
+
+## Accepted S4 handler topology
+
+The working runtime uses both:
+
+```text
+/var/www/onlyoffice/WebStudio/Products/Files/HttpHandlers/brimstone-megas4.ashx
+/var/www/onlyoffice/WebStudio/bin/brimstone-megas4.ashx.brimstone.compiled
+```
+
+The physical `.ashx` contains the Brimstone source handler directive and has accepted SHA-256:
+
+```text
+b965422c50d04294e8e1d446e397dfd6fa3477b531b0df0bd179d670d8861b44
+```
+
+Exactly one `.compiled` metadata file maps that route to:
+
+```text
+ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler
+```
+
+No temporary Brimstone `Web.config` handler mapping is required. An anonymous local route probe resolving as HTTP 401 proves the compiled handler path executes instead of falling into Mono's dynamic `.ashx` parser.
+
+## Accepted Safari UI
+
+The cumulative accepted UI overlay contains:
+
+- v1
+- v2
+- v3 layout normaliser
+- legacy v3 `MutationObserver` disabled
+- guarded v4.1 observer
+
+Accepted overlay SHA-256:
+
+```text
+ee90cfbd7e6ed94008e555e501bde917b39677c49da8a47924112c614888f967
+```
+
+The legacy v3 observer caused a Safari mutation feedback loop. The accepted build keeps the v3 layout logic but disables only that observer; v4.1 owns guarded observation/normalisation.
+
+## Known accepted browser limitations
+
+1. **Saved connection settings are effectively immutable.** Endpoint, access key, secret key and bucket selection are not supported as an in-place edit. Delete/recreate the connection when those values must change.
+2. **Safari stale-session issue.** Safari can retain a Connected Clouds JavaScript session in which the existing MEGA S4 account/settings view opens but `Connect cloud -> MEGA S4` does not respond.
+3. **Proven workaround.** Use a Safari Private Window for a clean session when creating/recreating a MEGA S4 connection. Emptying caches and reloading may also clear the stale condition.
+4. The stale-session symptom is not by itself a provider/backend failure when the existing connection still opens.
+
+These are documented accepted limitations, not blockers to the current working S4 connector.
+
+## External MySQL protection
+
+On the accepted 20 August 2026 production container, `/app/run-community-server.sh` contained one exact bare:
+
+```text
+mysqladmin shutdown
+```
+
+while `root.cnf` targeted `onlyoffice-mysql-server`.
+
+The canonical installer counts exact vulnerable shutdown lines rather than assuming a hard-coded number and replaces each with the local-socket-only guarded form:
+
+```text
+mysqladmin --no-defaults --protocol=socket --socket=/var/run/mysqld/mysqld.sock shutdown || true
+```
+
+Verification requires an unmixed safe state and checks that external MySQL `RestartCount` and `StartedAt` remain unchanged across a CommunityServer restart.
+
+## Canonical release tooling
+
+Production S4 tooling on this branch:
+
+```text
+tools/lib/brimstone-connectors-common.sh
+tools/brimstone-build-combined.sh
+tools/brimstone-s4-install.sh
+```
+
+Operator commands:
+
+```bash
+./tools/brimstone-s4-install.sh status
+./tools/brimstone-s4-install.sh verify
+./tools/brimstone-s4-install.sh install
+./tools/brimstone-s4-install.sh rollback
+```
+
+The release architecture is one repository and one Git update with two connector-specific front-ends sharing the same combined-DLL build/runtime safety engine.
+
+## MEGA Cloud
+
+The normal MEGA Cloud provider remains compiled into the shared DLL. Its earlier read/write/full-write milestones and versioned development documentation remain historical evidence. A separate canonical MEGA Cloud production front-end is still to be promoted onto the shared release engine once its runtime dependencies are packaged cleanly.
+
+## Current position
+
+MEGA S4 is browser-accepted and operational with the documented Safari limitations above. Do not revive old v0.001/v0.005 assumptions or historical `sbox-megas4-` IDs when working from this release branch.
