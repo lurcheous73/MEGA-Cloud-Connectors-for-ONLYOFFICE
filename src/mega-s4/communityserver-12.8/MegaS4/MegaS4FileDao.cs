@@ -146,29 +146,11 @@ namespace ASC.Files.Thirdparty.MegaS4
         public void ContinueVersion(object fileId, int fileVersion) { }
         public bool UseTrashForRemove(File file) { return false; }
 
-        // BRIMSTONE CUSTOM CODE: ProviderFileDao converts third-party IDs to
-        // provider-native IDs before entering this DAO. ChunkedUploadSession is
-        // then persisted between HTTP requests, so those IDs must be restored to
-        // the external ONLYOFFICE namespace before the session leaves the DAO.
-        // This mirrors the lifecycle used by the stock Dropbox provider.
-        private File RestoreIds(File file)
-        {
-            if (file == null) return null;
-
-            if (file.ID != null)
-                file.ID = MakeId(DecodeId(file.ID));
-
-            if (file.FolderID != null)
-                file.FolderID = MakeId(DecodeId(file.FolderID));
-
-            return file;
-        }
-
         public ChunkedUploadSession CreateUploadSession(File file, long contentLength)
         {
             if (file == null) throw new ArgumentNullException("file");
             if (SetupInfo.ChunkUploadSize > contentLength && contentLength >= 0)
-                return new ChunkedUploadSession(RestoreIds(file), contentLength) { UseChunks = false };
+                return new ChunkedUploadSession(file, contentLength) { UseChunks = false };
 
             string key;
             if (file.ID != null)
@@ -187,7 +169,6 @@ namespace ASC.Files.Thirdparty.MegaS4
             session.Items["MegaS4UploadId"] = ProviderInfo.Storage.BeginMultipart(key);
             session.Items["MegaS4PartNumber"] = 1;
             session.Items["MegaS4ETags"] = new Dictionary<int, string>();
-            session.File = RestoreIds(session.File);
             return session;
         }
 
@@ -214,8 +195,6 @@ namespace ASC.Files.Thirdparty.MegaS4
 
             if (session.LastChunk || (session.BytesTotal >= 0 && session.BytesUploaded == session.BytesTotal))
                 session.File = FinalizeUploadSession(session);
-            else
-                session.File = RestoreIds(session.File);
 
             return session.File;
         }
