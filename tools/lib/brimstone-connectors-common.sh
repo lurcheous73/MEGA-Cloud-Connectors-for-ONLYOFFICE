@@ -22,6 +22,8 @@ BRIMSTONE_STOCK_MARKER_SHA="24fce7c547069682c963ad5bdddc3b597df0f6dc02b663e7f243
 
 BRIMSTONE_UI_ASSET="$BRIMSTONE_ROOT/src/mega-s4/communityserver-12.8/ui/mega-s4-thirdparty-accepted.js"
 BRIMSTONE_UI_SHA="ee90cfbd7e6ed94008e555e501bde917b39677c49da8a47924112c614888f967"
+BRIMSTONE_HANDLER_SOURCE_ASSET="$BRIMSTONE_ROOT/src/mega-s4/communityserver-12.8/ui/brimstone-megas4.ashx"
+BRIMSTONE_HANDLER_SOURCE_SHA="b965422c50d04294e8e1d446e397dfd6fa3477b531b0df0bd179d670d8861b44"
 BRIMSTONE_HANDLER_MARKER_ASSET="$BRIMSTONE_ROOT/src/mega-s4/communityserver-12.8/ui/brimstone-megas4.marker"
 BRIMSTONE_HANDLER_COMPILED_ASSET="$BRIMSTONE_ROOT/src/mega-s4/communityserver-12.8/ui/brimstone-megas4.ashx.brimstone.compiled"
 
@@ -52,6 +54,8 @@ brimstone_repo_preflight(){
   }
   [[ -s "$BRIMSTONE_UI_ASSET" ]] || brimstone_fail "accepted S4 UI asset missing" || return 1
   [[ "$(brimstone_sha "$BRIMSTONE_UI_ASSET")" == "$BRIMSTONE_UI_SHA" ]] || brimstone_fail "accepted S4 UI asset hash mismatch" || return 1
+  [[ -s "$BRIMSTONE_HANDLER_SOURCE_ASSET" ]] || brimstone_fail "accepted S4 source-handler asset missing" || return 1
+  [[ "$(brimstone_sha "$BRIMSTONE_HANDLER_SOURCE_ASSET")" == "$BRIMSTONE_HANDLER_SOURCE_SHA" ]] || brimstone_fail "accepted S4 source-handler asset hash mismatch" || return 1
 }
 
 brimstone_platform_preflight(){
@@ -75,6 +79,15 @@ brimstone_mysql_host(){
   docker exec "$BRIMSTONE_CONTAINER" sh -lc "awk -F= 'tolower(\$1)==\"host\"{gsub(/[[:space:]]/,\"\",\$2); print \$2; exit}' /etc/mysql/conf.d/root.cnf 2>/dev/null || true"
 }
 
+brimstone_mysql_protection_ok(){
+  local p s
+  p="$(brimstone_mysql_plain_count)"
+  s="$(brimstone_mysql_safe_count)"
+  [[ "$(brimstone_mysql_host)" == "onlyoffice-mysql-server" ]] || return 1
+  [[ "$p" == "0" ]] || return 1
+  [[ "$s" =~ ^[1-9][0-9]*$ ]] || return 1
+}
+
 brimstone_mysql_snapshot(){
   printf '%s|%s\n' \
     "$(docker inspect -f '{{.RestartCount}}' "$BRIMSTONE_DB_CONTAINER")" \
@@ -88,16 +101,18 @@ brimstone_mysql_assert_snapshot(){
 }
 
 brimstone_install_mysql_protection(){
-  local backup_dir="$1" p s tmp patched
+  local backup_dir="$1" p s expected tmp patched
   p="$(brimstone_mysql_plain_count)"
   s="$(brimstone_mysql_safe_count)"
   [[ "$(brimstone_mysql_host)" == "onlyoffice-mysql-server" ]] || brimstone_fail "root.cnf is not targeting onlyoffice-mysql-server" || return 1
 
-  if [[ "$p" == "0" && "$s" == "2" ]]; then
-    echo "PASS: external-MySQL restart protection already installed"
+  if [[ "$p" == "0" && "$s" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PASS: external-MySQL restart protection already installed ($s guarded call(s))"
     return 0
   fi
-  [[ "$p" == "2" && "$s" == "0" ]] || brimstone_fail "unexpected CommunityServer mysqladmin shutdown state: plain=$p safe=$s" || return 1
+
+  [[ "$p" =~ ^[1-9][0-9]*$ && "$s" == "0" ]] || brimstone_fail "unexpected CommunityServer mysqladmin shutdown state: plain=$p safe=$s" || return 1
+  expected="$p"
 
   mkdir -p "$backup_dir"
   docker cp "$BRIMSTONE_CONTAINER:$BRIMSTONE_RUN_SCRIPT" "$backup_dir/run-community-server.sh.pre-mysql-protection" >/dev/null
@@ -105,20 +120,21 @@ brimstone_install_mysql_protection(){
 
   tmp="$(mktemp)"; patched="$(mktemp)"
   docker cp "$BRIMSTONE_CONTAINER:$BRIMSTONE_RUN_SCRIPT" "$tmp" >/dev/null
-  awk -v safe='mysqladmin --no-defaults --protocol=socket --socket=/var/run/mysqld/mysqld.sock shutdown || true' '
+  awk -v safe='mysqladmin --no-defaults --protocol=socket --socket=/var/run/mysqld/mysqld.sock shutdown || true' -v expected="$expected" '
     /^[[:space:]]*mysqladmin shutdown[[:space:]]*$/ {
       match($0, /^[[:space:]]*/); print substr($0,RSTART,RLENGTH) safe; n++; next
     }
     { print }
-    END { if (n != 2) exit 42 }
-  ' "$tmp" > "$patched" || { rm -f "$tmp" "$patched"; brimstone_fail "could not patch exactly two mysqladmin shutdown lines"; return 1; }
+    END { if (n != expected) exit 42 }
+  ' "$tmp" > "$patched" || { rm -f "$tmp" "$patched"; brimstone_fail "could not patch exactly $expected mysqladmin shutdown line(s)"; return 1; }
   bash -n "$patched" || { rm -f "$tmp" "$patched"; brimstone_fail "patched CommunityServer run script is invalid"; return 1; }
   docker cp "$patched" "$BRIMSTONE_CONTAINER:/tmp/brimstone-run-community-server.sh" >/dev/null
   docker exec "$BRIMSTONE_CONTAINER" install -o 0 -g 0 -m 755 /tmp/brimstone-run-community-server.sh "$BRIMSTONE_RUN_SCRIPT"
   docker exec "$BRIMSTONE_CONTAINER" rm -f /tmp/brimstone-run-community-server.sh
   rm -f "$tmp" "$patched"
-  [[ "$(brimstone_mysql_plain_count)" == "0" && "$(brimstone_mysql_safe_count)" == "2" ]] || brimstone_fail "external-MySQL protection did not validate after install" || return 1
-  echo "PASS: external-MySQL restart protection installed"
+  [[ "$(brimstone_mysql_plain_count)" == "0" ]] || brimstone_fail "external-MySQL protection left a plain shutdown call" || return 1
+  [[ "$(brimstone_mysql_safe_count)" == "$expected" ]] || brimstone_fail "external-MySQL protection expected $expected guarded call(s)" || return 1
+  echo "PASS: external-MySQL restart protection installed ($expected exact call(s) patched)"
 }
 
 brimstone_wait_ready(){
