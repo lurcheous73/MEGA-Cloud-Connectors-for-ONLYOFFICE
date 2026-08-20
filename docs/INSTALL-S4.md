@@ -40,7 +40,7 @@ Rollback the last canonical S4 installation with:
 sudo ./tools/brimstone-s4-install.sh rollback
 ```
 
-The installer is idempotent: if the exact built DLL and all accepted runtime contracts are already installed, `install` reports that no change is required.
+The installer is idempotent: if the exact built DLL, external-MySQL protection and all accepted runtime contracts are already installed, `install` reports that no change is required.
 
 ## What `install` does
 
@@ -52,7 +52,7 @@ The installer is idempotent: if the exact built DLL and all accepted runtime con
 6. Backs up the current connector DLL, S4 handler and all S4-patched UI runtime files.
 7. Ensures CommunityServer cannot shut down the external `onlyoffice-mysql-server` during restart.
 8. Installs the combined connector DLL.
-9. Installs the precompiled Brimstone MEGA S4 handler metadata.
+9. Installs the browser-accepted S4 source `.ashx` directive together with its precompiled `.compiled` mapping metadata.
 10. Installs the exact browser-accepted cumulative S4 UI overlay.
 11. Rebuilds existing `.gz` UI copies deterministically with `gzip -n`.
 12. Restarts only `onlyoffice-community-server`.
@@ -65,15 +65,48 @@ If installation fails after runtime mutation begins, the connector runtime is re
 
 ## External MySQL safety
 
-CommunityServer 12.8's startup script contains two plain `mysqladmin shutdown` calls. With `root.cnf` targeting the external MySQL container, those calls can shut down the external database during a CommunityServer restart.
+The browser-accepted production container observed on 20 August 2026 contains one bare:
 
-The Brimstone safety patch changes only those exact two calls to local-socket-only commands:
+```text
+mysqladmin shutdown
+```
+
+in `/app/run-community-server.sh`, while `/etc/mysql/conf.d/root.cnf` targets the external `onlyoffice-mysql-server` container. A CommunityServer restart can therefore shut down the external database.
+
+The canonical installer does **not** assume a hard-coded number of vulnerable lines. It counts exact bare `mysqladmin shutdown` lines in the supported CommunityServer image and, only when the runtime is in an unmixed state, replaces each exact match with:
 
 ```text
 mysqladmin --no-defaults --protocol=socket --socket=/var/run/mysqld/mysqld.sock shutdown || true
 ```
 
-This protection is a platform safety invariant. S4 rollback intentionally **does not** restore the vulnerable shutdown commands.
+A mixed state containing both bare and guarded shutdown calls is rejected rather than guessed at. After protection, verification requires zero bare calls and one or more guarded local-socket calls.
+
+This protection is a platform safety invariant. S4 rollback intentionally **does not** restore vulnerable shutdown commands.
+
+## Accepted S4 handler topology
+
+The browser-tested runtime uses both:
+
+```text
+/var/www/onlyoffice/WebStudio/Products/Files/HttpHandlers/brimstone-megas4.ashx
+/var/www/onlyoffice/WebStudio/bin/brimstone-megas4.ashx.brimstone.compiled
+```
+
+The physical `.ashx` file contains the source handler directive:
+
+```text
+<%@ WebHandler Language="C#" Class="ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler, ASC.Files.Thirdparty" %>
+```
+
+Accepted source-handler SHA-256:
+
+```text
+b965422c50d04294e8e1d446e397dfd6fa3477b531b0df0bd179d670d8861b44
+```
+
+The `.compiled` metadata maps the same virtual path to `ASC.Files.Thirdparty.MegaS4.BrimstoneMegaS4Handler` in `ASC.Files.Thirdparty`. There must be exactly one compiled reference to that route and no temporary `Web.config` handler mapping.
+
+This exact source-handler + precompiled-metadata topology is what passed the authenticated Files UI acceptance tests. The canonical installer preserves it rather than converting the physical `.ashx` into the stock precompilation marker.
 
 ## Accepted S4 ID contract
 
