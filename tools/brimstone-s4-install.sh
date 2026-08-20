@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # BRIMSTONE CUSTOM CODE — canonical production installer for Brimstone MEGA S4.
 # Builds the shared S4 + MEGA Cloud DLL, installs the accepted Safari-safe UI,
-# installs the precompiled S4 handler, protects external MySQL, and rolls back
-# the connector runtime atomically on failure.
+# installs the browser-accepted S4 source-handler + precompiled mapping, protects
+# external MySQL, and rolls back the connector runtime atomically on failure.
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tools/lib/brimstone-connectors-common.sh
 source "$ROOT/tools/lib/brimstone-connectors-common.sh"
 
-VERSION="2026.08.20-working-1"
+VERSION="2026.08.20-working-2"
 BUILDER="$ROOT/tools/brimstone-build-combined.sh"
 STATE_FILE="$BRIMSTONE_STATE_ROOT/s4-current.env"
 STOCK_COMPILED="/var/www/onlyoffice/WebStudio/bin/thirdpartyapphandler.ashx.7edb1b4a.compiled"
@@ -17,7 +17,7 @@ STOCK_COMPILED="/var/www/onlyoffice/WebStudio/bin/thirdpartyapphandler.ashx.7edb
 fail(){ brimstone_fail "$@"; exit 1; }
 
 runtime_backup(){
-  local backup="$1" rel list compiled_present=0 p
+  local backup="$1" list compiled_present=0 p
   mkdir -p "$backup"
   list="${BRIMSTONE_LIVE_DLL#/} ${BRIMSTONE_HANDLER#/}"
   if docker exec "$BRIMSTONE_CONTAINER" test -e "$BRIMSTONE_COMPILED"; then
@@ -81,22 +81,32 @@ install_handler(){
   local huid hgid hmode cuid cgid cmode
   [[ "$(brimstone_web_map_count)" == "0" ]] || fail "temporary Web.config S4 handler mapping exists"
   [[ "$(brimstone_handler_ref_count)" =~ ^[01]$ ]] || fail "unexpected number of precompiled S4 handler references"
-  [[ -s "$BRIMSTONE_HANDLER_MARKER_ASSET" ]] || fail "handler marker asset missing"
-  [[ "$(brimstone_sha "$BRIMSTONE_HANDLER_MARKER_ASSET")" == "$BRIMSTONE_STOCK_MARKER_SHA" ]] || fail "handler marker asset hash mismatch"
-  [[ "$(brimstone_live_sha "$BRIMSTONE_STOCK_MARKER")" == "$BRIMSTONE_STOCK_MARKER_SHA" ]] || fail "stock handler marker differs from locked template"
-  docker exec "$BRIMSTONE_CONTAINER" test -s "$STOCK_COMPILED" || fail "stock .compiled template missing"
+  [[ -s "$BRIMSTONE_HANDLER_SOURCE_ASSET" ]] || fail "accepted S4 source-handler asset missing"
+  [[ "$(brimstone_sha "$BRIMSTONE_HANDLER_SOURCE_ASSET")" == "$BRIMSTONE_HANDLER_SOURCE_SHA" ]] || fail "accepted S4 source-handler hash mismatch"
+  docker exec "$BRIMSTONE_CONTAINER" test -s "$STOCK_COMPILED" || fail "stock .compiled permissions template missing"
   validate_compiled_asset
 
-  read -r huid hgid hmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$BRIMSTONE_STOCK_MARKER")
-  read -r cuid cgid cmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$STOCK_COMPILED")
-  docker cp "$BRIMSTONE_HANDLER_MARKER_ASSET" "$BRIMSTONE_CONTAINER:/tmp/brimstone-megas4.marker" >/dev/null
-  docker exec "$BRIMSTONE_CONTAINER" install -o "$huid" -g "$hgid" -m "$hmode" /tmp/brimstone-megas4.marker "$BRIMSTONE_HANDLER"
+  if docker exec "$BRIMSTONE_CONTAINER" test -e "$BRIMSTONE_HANDLER"; then
+    read -r huid hgid hmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$BRIMSTONE_HANDLER")
+  else
+    read -r huid hgid hmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$BRIMSTONE_STOCK_MARKER")
+  fi
+
+  if docker exec "$BRIMSTONE_CONTAINER" test -e "$BRIMSTONE_COMPILED"; then
+    read -r cuid cgid cmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$BRIMSTONE_COMPILED")
+  else
+    read -r cuid cgid cmode < <(docker exec "$BRIMSTONE_CONTAINER" stat -c '%u %g %a' "$STOCK_COMPILED")
+  fi
+
+  docker cp "$BRIMSTONE_HANDLER_SOURCE_ASSET" "$BRIMSTONE_CONTAINER:/tmp/brimstone-megas4.ashx" >/dev/null
+  docker exec "$BRIMSTONE_CONTAINER" install -o "$huid" -g "$hgid" -m "$hmode" /tmp/brimstone-megas4.ashx "$BRIMSTONE_HANDLER"
   docker cp "$BRIMSTONE_HANDLER_COMPILED_ASSET" "$BRIMSTONE_CONTAINER:/tmp/brimstone-megas4.compiled" >/dev/null
   docker exec "$BRIMSTONE_CONTAINER" install -o "$cuid" -g "$cgid" -m "$cmode" /tmp/brimstone-megas4.compiled "$BRIMSTONE_COMPILED"
-  docker exec "$BRIMSTONE_CONTAINER" rm -f /tmp/brimstone-megas4.marker /tmp/brimstone-megas4.compiled
-  [[ "$(brimstone_live_sha "$BRIMSTONE_HANDLER")" == "$BRIMSTONE_STOCK_MARKER_SHA" ]] || fail "installed S4 handler marker hash mismatch"
+  docker exec "$BRIMSTONE_CONTAINER" rm -f /tmp/brimstone-megas4.ashx /tmp/brimstone-megas4.compiled
+
+  [[ "$(brimstone_live_sha "$BRIMSTONE_HANDLER")" == "$BRIMSTONE_HANDLER_SOURCE_SHA" ]] || fail "installed S4 source-handler hash mismatch"
   [[ "$(brimstone_handler_ref_count)" == "1" ]] || fail "expected exactly one precompiled S4 handler reference"
-  echo "PASS: precompiled S4 handler installed"
+  echo "PASS: browser-accepted S4 source-handler + precompiled mapping installed"
 }
 
 patch_ui_file(){
@@ -173,18 +183,38 @@ route_probe(){
   rm -f "$body"; fail "unexpected S4 route response HTTP ${code:-unknown}"
 }
 
+verify_mysql_state_readonly(){
+  local host p s
+  host="$(brimstone_mysql_host)"
+  p="$(brimstone_mysql_plain_count)"
+  s="$(brimstone_mysql_safe_count)"
+  [[ "$host" == "onlyoffice-mysql-server" ]] || fail "root.cnf is not targeting onlyoffice-mysql-server"
+
+  if [[ "$p" == "0" && "$s" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PASS: external-MySQL restart protection active ($s guarded call(s))"
+    return 0
+  fi
+
+  if [[ "$p" =~ ^[1-9][0-9]*$ && "$s" == "0" ]]; then
+    echo "INFO: external-MySQL protection pending; install will patch $p exact plain shutdown call(s)"
+    return 0
+  fi
+
+  fail "unexpected CommunityServer mysqladmin state: plain=$p safe=$s"
+}
+
 verify(){
   local p before
   brimstone_repo_preflight || return 1
   brimstone_platform_preflight || return 1
   before="$(brimstone_mysql_snapshot)"
-  [[ "$(brimstone_mysql_plain_count)" == "0" ]] || fail "plain external mysqladmin shutdown call remains"
-  [[ "$(brimstone_mysql_safe_count)" == "2" ]] || fail "expected exactly two local-socket mysqladmin shutdown calls"
+  verify_mysql_state_readonly
   brimstone_validate_live_dll || fail "live combined DLL contract failed"
-  [[ "$(brimstone_live_sha "$BRIMSTONE_HANDLER")" == "$BRIMSTONE_STOCK_MARKER_SHA" ]] || fail "S4 physical handler is not precompiled marker"
+  [[ "$(brimstone_live_sha "$BRIMSTONE_HANDLER")" == "$BRIMSTONE_HANDLER_SOURCE_SHA" ]] || fail "S4 physical handler is not the browser-accepted source directive"
   docker exec "$BRIMSTONE_CONTAINER" test -s "$BRIMSTONE_COMPILED" || fail "S4 .compiled metadata missing"
   [[ "$(brimstone_handler_ref_count)" == "1" ]] || fail "S4 precompiled handler reference count is not one"
   [[ "$(brimstone_web_map_count)" == "0" ]] || fail "obsolete Web.config S4 mapping remains"
+  validate_compiled_asset
   for p in "${BRIMSTONE_UI_PATHS[@]}"; do
     [[ "$(brimstone_live_ui_tail_hash "$p")" == "$BRIMSTONE_UI_SHA" ]] || fail "live accepted S4 UI mismatch: $p"
   done
@@ -227,7 +257,7 @@ install(){
   [[ -s "$candidate" ]] || fail "combined candidate missing after build"
   candidate_sha="$(brimstone_sha "$candidate")"
 
-  if [[ "$(brimstone_live_sha "$BRIMSTONE_LIVE_DLL")" == "$candidate_sha" ]] && verify >/dev/null 2>&1; then
+  if brimstone_mysql_protection_ok && [[ "$(brimstone_live_sha "$BRIMSTONE_LIVE_DLL")" == "$candidate_sha" ]] && verify >/dev/null 2>&1; then
     echo "PASS: this exact Brimstone S4 release is already installed and verified"
     echo "DLL: $candidate_sha"
     return 0
@@ -252,6 +282,7 @@ install(){
   # External-MySQL protection is a safety invariant and is intentionally retained
   # even if the connector payload is later rolled back.
   brimstone_install_mysql_protection "$backup"
+  brimstone_mysql_protection_ok || fail "external-MySQL protection is not active after patch"
   mutated=1
   deploy_dll "$candidate"
   install_handler
@@ -262,6 +293,7 @@ install(){
   docker restart "$BRIMSTONE_CONTAINER" >/dev/null
   brimstone_wait_ready
   brimstone_mysql_assert_snapshot "$db_before"
+  brimstone_mysql_protection_ok || fail "external-MySQL protection was lost during restart"
   verify
 
   mkdir -p "$BRIMSTONE_STATE_ROOT"
@@ -292,7 +324,7 @@ rollback(){
   backup="${backup_dir:-}"
   [[ -n "$backup" ]] || fail "state file does not identify a backup"
   # Never reintroduce vulnerable external-MySQL shutdown calls.
-  if [[ "$(brimstone_mysql_plain_count)" != "0" || "$(brimstone_mysql_safe_count)" != "2" ]]; then
+  if ! brimstone_mysql_protection_ok; then
     brimstone_install_mysql_protection "$backup"
   fi
   db_before="$(brimstone_mysql_snapshot)"
