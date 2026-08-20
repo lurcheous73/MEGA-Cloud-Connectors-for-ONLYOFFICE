@@ -2,64 +2,82 @@
 
 ## Final operator experience
 
-The production release of this repository MUST install and update both user-facing connectors from one checked-out repository state:
+The production release keeps both user-facing connectors in one repository and one checked-out release state:
 
 - Brimstone MEGA S4
 - Brimstone MEGA Cloud
 
-The intended final operator flow is deliberately one pull and one installer entry point, for example:
+The operator performs one Git update and then chooses the connector entry point required on that host:
 
 ```bash
-git pull
-sudo ./tools/brimstone-install.sh install
+git pull --ff-only
+sudo ./tools/brimstone-s4-install.sh install
 ```
 
-The exact final command name may change before release, but the one-repository / one-installer contract does not.
+MEGA Cloud uses its own front-end installer when required:
 
-## Atomicity and safety
+```bash
+sudo ./tools/brimstone-cloud-install.sh install
+```
 
-The combined installer must treat the two connectors as one release unit while validating each connector independently.
+The two front ends MUST share the same combined `ASC.Files.Thirdparty.dll` builder and common runtime safety library. Neither installer is permitted to compile or deploy a connector-specific DLL that removes the other provider.
+
+MEGA S4 is the first canonical production front end. The MEGA Cloud front end will be promoted onto the same shared engine after its separate runtime dependencies are packaged.
+
+## Shared-DLL atomicity and safety
+
+The repository treats the shared ONLYOFFICE provider assembly as one release unit while validating each provider independently.
 
 Required behaviour:
 
-1. Fail closed on unsupported ONLYOFFICE image/build/hash combinations.
-2. Refuse a dirty or unexpected repository state when exact release validation is required.
-3. Back up every runtime file that will be replaced before changing anything.
-4. Protect the external `onlyoffice-mysql-server`; CommunityServer restart logic must never issue a client shutdown against the external MySQL container.
-5. Install shared dependencies once, then install Brimstone MEGA S4 and Brimstone MEGA Cloud payloads.
-6. Preserve existing ONLYOFFICE providers and existing connected accounts.
-7. Restart only the minimum required component, normally CommunityServer, never the whole stack as a convenience shortcut.
-8. Run a common platform health check plus separate S4 and Cloud connector health checks.
-9. If either connector fails install-time acceptance, roll the whole release back to the pre-install snapshot unless the operator explicitly selected a connector-specific development mode.
-10. Verify protected invariants after restart, including MySQL `RestartCount`/`StartedAt` and locked runtime hashes where applicable.
+1. Fail closed on unsupported ONLYOFFICE image/build combinations.
+2. Refuse a dirty repository when exact release validation is required.
+3. Build the shared assembly from one pinned CommunityServer source tree containing both Brimstone providers.
+4. Reject the historical MEGA S4 `sbox-megas4-` namespace and require the browser-accepted `sboxmega-` namespace.
+5. Back up every runtime file that will be replaced before changing anything.
+6. Protect the external `onlyoffice-mysql-server`; CommunityServer restart logic must never issue a client shutdown against the external MySQL container.
+7. Preserve stock ONLYOFFICE providers and existing connected-account rows.
+8. Restart only the minimum required component, normally CommunityServer, never the whole stack as a convenience shortcut.
+9. Run common platform health checks plus connector-specific runtime checks.
+10. If a connector install fails after runtime mutation starts, restore the pre-install connector runtime automatically.
+11. Verify protected invariants after restart, including MySQL `RestartCount` and `StartedAt`.
+12. Re-running the same release must be idempotent or explicitly report that no change is required.
 
 ## Release layout
-
-Development may remain split into connector-specific source trees and test tools, but the release tree must converge on a shared layout similar to:
 
 ```text
 src/
   mega-s4/
   mega-cloud/
 tools/
-  brimstone-install.sh        # production entry point for BOTH
-  brimstone-status.sh         # reports BOTH
-  brimstone-rollback.sh       # release rollback for BOTH
-  dev/                        # connector-specific development helpers
+  lib/
+    brimstone-connectors-common.sh
+  brimstone-build-combined.sh
+  brimstone-s4-install.sh
+  brimstone-cloud-install.sh       # promoted when Cloud packaging is complete
 ```
 
-All custom code, generated metadata, runtime markers, backups and log prefixes created by this project must retain an obvious `BRIMSTONE` / `Brimstone` identity.
+All custom code, generated metadata, runtime markers, backups and log prefixes created by this project retain an obvious `BRIMSTONE` / `Brimstone` identity.
+
+## Shared builder ownership
+
+`tools/brimstone-build-combined.sh` is the only production path that builds the custom `ASC.Files.Thirdparty.dll`.
+
+It must always compile and validate both:
+
+- `ASC.Files.Thirdparty.MegaS4`
+- `ASC.Files.Thirdparty.BrimstoneMegaCloud`
+
+A connector-specific installer may install additional UI, handlers or native/runtime dependencies, but it must consume the shared candidate produced by that builder.
 
 ## Dependency ownership
 
-Any native MEGA SDK component required by Brimstone MEGA Cloud must be installed by the same production installer and version-pinned by the repository. The operator must not need to clone a second repository, run an unrelated SDK installer, manually copy libraries, or maintain a separate checkout.
+Any native MEGA SDK component required by Brimstone MEGA Cloud must be installed by the MEGA Cloud front end from a version-pinned repository manifest. The operator must not need an unrelated checkout or a manual library-copy procedure.
 
-Third-party source can be built or packaged during the release engineering process, but the deployed release must remain reproducible from this repository's pinned manifest/build instructions.
+CommunityServer source used for the shared assembly is pinned by commit. The shared builder may bootstrap that source repository if the local build cache is absent.
 
 ## Upgrade rule
 
-A future `git pull` followed by the production installer must be able to detect the currently installed Brimstone release and safely upgrade both connectors together. Re-running the same release must be idempotent or explicitly report that no change is required.
+A future `git pull --ff-only` followed by either canonical connector installer must detect the current runtime, preserve the other provider in the shared assembly, back up the files it changes, and safely upgrade the selected connector.
 
-## Development exception
-
-During development, S4 and Cloud may be installed/tested independently to reduce blast radius. That is a development convenience only and must not become the final operator workflow.
+The S4 canonical installer and its browser-accepted baseline are documented in `docs/INSTALL-S4.md`.
